@@ -147,3 +147,5 @@ build/
 *.war
 .idea/
 *.iml
+
+.vscode
