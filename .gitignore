@@ -140,7 +140,7 @@ vite.config.ts.timestamp-*
 
 
 # Gradle
-./gradle
+.gradle/
 build/
 *.class
 *.jar
