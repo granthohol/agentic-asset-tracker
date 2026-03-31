@@ -18,13 +18,10 @@ repositories {
 }
 
 dependencies {
-    // The core web tools and the built-in server
     implementation("org.springframework.boot:spring-boot-starter-web")
     
-    // Added for Phase 2/3 real-time map updates
     implementation("org.springframework.boot:spring-boot-starter-websocket")
     
-    // Fixed the test name so automated testing works later
     testImplementation("org.springframework.boot:spring-boot-starter-test")
     
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
