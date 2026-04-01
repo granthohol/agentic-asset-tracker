@@ -41,11 +41,11 @@ public class DroneService {
             double latDelta = (random.nextDouble() - 0.5) * 0.002;  // random val [-0.001, 0.001]
             double longDelta = (random.nextDouble() - 0.5) * 0.002;
 
-            Drone new_drone = new Drone(currDrone.id(), currDrone.latitude() + latDelta,
+            Drone newDrone = new Drone(currDrone.id(), currDrone.latitude() + latDelta,
                                         currDrone.longitude() + longDelta, currDrone.batteryLevel(),
                                         currDrone.status()); 
 
-            drones.set(i, new_drone);
+            drones.set(i, newDrone);
         }
 
         return drones;
