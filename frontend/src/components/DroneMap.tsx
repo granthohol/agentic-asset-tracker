@@ -1,7 +1,20 @@
-import {MapContainer, TileLayer} from 'react-leaflet';
+import L from 'leaflet';
+
+import icon from 'leaflet/dist/images/marker-icon.png';
+import iconShadow from 'leaflet/dist/images/marker-shadow.png';
+import iconRetina from 'leaflet/dist/images/marker-icon-2x.png';
+
+import {MapContainer, TileLayer, Marker, Popup} from 'react-leaflet';
 import { useState, useEffect } from 'react';
 
 import type { Drone } from '../types/drone'
+
+delete (L.Icon.Default.prototype as any)._getIconUrl;
+L.Icon.Default.mergeOptions({
+  iconUrl: icon,
+  iconRetinaUrl: iconRetina,
+  shadowUrl: iconShadow,
+});
 
 export default function DroneMap() {
     const [drones, setDrones] = useState<Drone[]>([]);
@@ -33,7 +46,20 @@ export default function DroneMap() {
             <TileLayer
                 attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
                 url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-            />
+            /> 
+            {drones.map((drone) => (
+                <Marker
+                    key = {drone.id}
+                    position = {[drone.latitude, drone.longitude]}
+                >
+                    <Popup>
+                        id: {drone.id} <br />
+                        Battery Level: {drone.batteryLevel} <br />
+                        Status: {drone.status}
+                    </Popup>
+                </Marker>
+            ))}
+
         </MapContainer>
     );
 }
