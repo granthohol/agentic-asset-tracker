@@ -33,7 +33,7 @@ All fields are **required** for v1 (subject to change).
 
 ```json
 {
-  "droneId": "drone-042",
+  "droneId": "drone-42",
   "latitude": 39.012345,
   "longitude": -77.123456,
   "batteryLevel": 87,

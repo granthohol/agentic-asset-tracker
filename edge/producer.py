@@ -128,11 +128,11 @@ def main() -> None:
                 # Record KEY is droneId so all events for one drone share one partition
                 future = producer.send(args.topic, key=d.drone_id, value=payload)
                 try:
-                    future.get(timeout=10)
+                    future.get(timeout=10)  # TODO: potentially edit for better latency (use callbacks)
                 except KafkaError as exc:
                     print(f"Kafka error for {d.drone_id}: {exc}")
 
-            producer.flush()    # wait until every message has been acknowledged
+            producer.flush()    # wait until every message has been acknowledged (TODO: potentially edit for better latency (remove)
             sleep_with_jitter(args.interval, args.jitter_ratio)
     except KeyboardInterrupt:
         print("Stopping producer (flushing)...")
