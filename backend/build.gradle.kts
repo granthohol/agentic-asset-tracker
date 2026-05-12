@@ -21,6 +21,12 @@ dependencies {
     implementation("org.springframework.boot:spring-boot-starter-web")
     
     implementation("org.springframework.boot:spring-boot-starter-websocket")
+
+    implementation("org.springframework.boot:spring-boot-starter-kafka")
+
+    implementation("org.springframework.boot:spring-boot-starter-json")
+
+    implementation("com.fasterxml.jackson.core:jackson-databind")
     
     testImplementation("org.springframework.boot:spring-boot-starter-test")
     
