@@ -149,3 +149,4 @@ build/
 *.iml
 
 .vscode
+*.venv
