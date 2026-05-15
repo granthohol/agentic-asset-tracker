@@ -1,5 +1,5 @@
 
-## Producer
+## Manual Terminal Producer (Testing)
 ```bash
 docker compose -f infra/docker-compose.yml exec broker \
   /opt/kafka/bin/kafka-console-producer.sh \
@@ -7,7 +7,7 @@ docker compose -f infra/docker-compose.yml exec broker \
   --topic drone.telemetry.v1
 ```
 
-## Consumer
+## Terminal Consumer (Testing)
 ```bash
 docker compose -f infra/docker-compose.yml exec broker \
   /opt/kafka/bin/kafka-console-consumer.sh \
