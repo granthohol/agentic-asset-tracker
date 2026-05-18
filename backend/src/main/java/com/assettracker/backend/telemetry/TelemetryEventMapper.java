@@ -1,4 +1,4 @@
-package com.assettracker.backend.kafka;
+package com.assettracker.backend.telemetry;
 import com.assettracker.backend.model.Drone;
 import com.assettracker.backend.model.DroneStatus;
 

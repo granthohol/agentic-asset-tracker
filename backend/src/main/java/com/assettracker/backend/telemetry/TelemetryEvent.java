@@ -1,4 +1,4 @@
-package com.assettracker.backend.kafka;
+package com.assettracker.backend.telemetry;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 

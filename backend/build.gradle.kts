@@ -27,6 +27,8 @@ dependencies {
     implementation("org.springframework.boot:spring-boot-starter-json")
 
     implementation("com.fasterxml.jackson.core:jackson-databind")
+
+    implementation("org.xerial:sqlite-jdbc")
     
     testImplementation("org.springframework.boot:spring-boot-starter-test")
     
