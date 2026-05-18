@@ -16,24 +16,99 @@ L.Icon.Default.mergeOptions({
   shadowUrl: iconShadow,
 });
 
+type TelemetryMessage =
+| { type: 'snapshot'; drones: Drone[] }
+| { type: 'droneUpdate'; drone: Drone };
+
+const WEBSOCKET_URL = "ws://localhost:8080/ws/drones";
+
 export default function DroneMap() {
-    const [drones, setDrones] = useState<Drone[]>([]);
+    const [, setConnectionStatus] = useState<'Connecting' | 'Open' | 'Closed' | 'Error'>('Connecting');
+    const [drones, setDrones] = useState<Map<string, Drone>>(new Map());
     useEffect(() => {
-        // This code runs exactly ONE time when the map first appears.
-        const timer = setInterval(() => {
-            
-            // Fetch the JSON from Spring Boot backend
-            fetch('http://localhost:8080/api/drones')
-                .then(response => response.json())
-                .then(data => {
-                    // It trips the useState wire, moving the drones on the map
-                    setDrones(data);
-                });
+        // Reconnect-with-backoff state, scoped to this effect run.
+        let cancelled = false;
+        let ws: WebSocket | null = null;
+        let reconnectAttempt = 0;
+        let reconnectTimer: number | null = null;
 
-        }, 1000);   // loop every 1000ms (one second)
+        const RECONNECT_BASE_MS = 1000;
+        const RECONNECT_MAX_MS = 30000;
 
-        // The Cleanup: If the user navigates away from the map, this destroys the timer.
-        return () => clearInterval(timer);
+        const scheduleReconnect = () => {
+            if (cancelled || reconnectTimer !== null) return;
+            const delay = Math.min(
+                RECONNECT_BASE_MS * Math.pow(2, reconnectAttempt),
+                RECONNECT_MAX_MS,
+            );
+            reconnectAttempt += 1;
+            console.log(`Reconnecting in ${delay}ms (attempt ${reconnectAttempt})`);
+            reconnectTimer = window.setTimeout(() => {
+                reconnectTimer = null;
+                connect();
+            }, delay);
+        };
+
+        const connect = () => {
+            if (cancelled) return;
+
+            ws = new WebSocket(WEBSOCKET_URL);
+
+            ws.onopen = () => {
+                console.log('WebSocket Connection Established');
+                setConnectionStatus('Open');
+                reconnectAttempt = 0; // healthy connection resets backoff
+            };
+
+            ws.onmessage = (event: MessageEvent) => {
+                // event is a raw string frame. Parse into JSON
+                const message = JSON.parse(event.data) as TelemetryMessage;
+
+                // Application level multiplexer
+                switch (message.type) {
+                    case 'snapshot':
+                        const nextMap = new Map(message.drones.map((drone) => [drone.id, drone]));
+                        setDrones(nextMap);
+                        break;
+                    case 'droneUpdate':
+                        setDrones(prevMap => {
+                            const nextMap = new Map(prevMap);
+                            nextMap.set(message.drone.id, message.drone);
+                            return nextMap;
+                        });
+                        break;
+                    default:
+                        console.log("Unhandled type in WebSocket TelemetryMessage");
+
+                }
+            };
+
+            ws.onclose = (event: CloseEvent) => {
+                console.log(`WebSocket Disconnected. Code: ${event.code}, Reason: ${event.reason}`);
+                setConnectionStatus('Closed');
+                scheduleReconnect();
+            };
+
+            ws.onerror = (error: Event) => {
+                console.error('WebSocket encountered an error', error);
+                setConnectionStatus('Error');
+                // onclose fires after onerror in browsers; reconnect is scheduled there.
+            };
+        };
+
+        connect();
+
+        return () => {
+            console.log('Component unmounting, tearing down WebSocket...');
+            cancelled = true;
+            if (reconnectTimer !== null) {
+                window.clearTimeout(reconnectTimer);
+                reconnectTimer = null;
+            }
+            if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
+                ws.close(); // Sends the TCP FIN packet to your Java server
+            }
+        };
 
     }, []); // [] -> runs once on mount, never again
 
@@ -47,7 +122,9 @@ export default function DroneMap() {
                 attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
                 url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
             /> 
-            {drones.map((drone) => (
+            {Array.from(drones.values())
+                .sort((a, b) => a.id.localeCompare(b.id))
+                .map((drone) => (
                 <Marker
                     key = {drone.id}
                     position = {[drone.latitude, drone.longitude]}
