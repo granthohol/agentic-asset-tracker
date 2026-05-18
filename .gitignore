@@ -150,3 +150,4 @@ build/
 
 .vscode
 *.venv
+backend/data
