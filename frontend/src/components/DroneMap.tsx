@@ -96,6 +96,7 @@ export default function DroneMap() {
             };
         };
 
+        // actual starting point
         connect();
 
         return () => {
