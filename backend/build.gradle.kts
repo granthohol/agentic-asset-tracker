@@ -29,6 +29,8 @@ dependencies {
     implementation("com.fasterxml.jackson.core:jackson-databind")
 
     implementation("org.xerial:sqlite-jdbc")
+
+    implementation("org.neo4j.driver:neo4j-java-driver:5.26.0")
     
     testImplementation("org.springframework.boot:spring-boot-starter-test")
     

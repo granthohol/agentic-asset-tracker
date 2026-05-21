@@ -22,3 +22,17 @@ services:
       KAFKA_SHARE_COORDINATOR_STATE_TOPIC_REPLICATION_FACTOR: 1
       KAFKA_SHARE_COORDINATOR_STATE_TOPIC_MIN_ISR: 1
       KAFKA_LOG_DIRS: "/tmp/kraft-combined-logs"
+
+  neo4j:
+    image: neo4j:5.26-community
+    container_name: neo4j
+    ports:
+      - "7474:7474"   # Browser UI (HTTP)
+      - "7687:7687"   # Bolt — what your Java driver uses
+    environment:
+      NEO4J_AUTH: neo4j/devpassword
+    volumes:
+      - neo4j_data:/data
+
+volumes:
+  neo4j_data:
