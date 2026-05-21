@@ -1,6 +1,6 @@
 # Ontology Schema (Nodes and Edges)
 
-Phase 3 models the fleet as a **graph** in Neo4j, not a flat list of drones. Nodes hold identity and attributes; edges express assignment and deployment. Telemetry still updates drone position and battery; this schema captures **who belongs to whom** and **what they are deployed for**.
+We model the fleet as a **graph** in Neo4j, not a flat list of drones. Nodes hold identity and attributes; edges express assignment and deployment. Telemetry still updates drone position and battery; this schema captures **who belongs to whom** and **what they are deployed for**.
 
 ---
 

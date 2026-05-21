@@ -39,7 +39,7 @@ Commands are the inverse of telemetry: **intent flows from Java → Kafka → Py
 }
 ```
 
-**Publish path:** `POST /api/commands` validates and publishes to this topic. **Do not** publish from `POST /api/plan` — the plan endpoint is read-only until the operator approves.
+**Publish path:** `POST /api/commands` validates and publishes to this topic. We **do not** publish from `POST /api/plan` — the plan endpoint is read-only until the operator approves.
 
 ---
 
@@ -63,7 +63,7 @@ Each element of `commands`:
 | `mission_type` | string | Mission label for this leg. |
 | `reason` | string | Why this drone was included (for the approval modal). |
 
-### Example ExecutionPlan (pretty-printed)
+### Example ExecutionPlan
 
 ```json
 {
