@@ -8,7 +8,7 @@ We model the fleet as a **graph** in Neo4j, not a flat list of drones. Nodes hol
 
 | Node | Fields | Notes |
 |------|--------|-------|
-| **Drone** | `id`, `lat`, `lng`, `batteryLevel`, `status`, `currentWaypoint?` | `currentWaypoint` is optional; set when a command steers the drone toward a target. |
+| **Drone** | `id`, `latitude`, `longitude`, `batteryLevel`, `status`, `currentWaypoint?` | `currentWaypoint` is optional; set when a command steers the drone toward a target. |
 | **Squadron** | `id`, `name`, `sectorId` | Groups drones by operational area (e.g. sector for planner queries). |
 | **Objective** | `id`, `name`, `priority` | Mission the squadron is deployed for. |
 
@@ -17,8 +17,8 @@ We model the fleet as a **graph** in Neo4j, not a flat list of drones. Nodes hol
 ```json
 {
   "id": "drone-042",
-  "lat": 39.012345,
-  "lng": -77.123456,
+  "latitude": 39.012345,
+  "longitude": -77.123456,
   "batteryLevel": 87,
   "status": "ACTIVE",
   "currentWaypoint": { "lat": 39.0, "lng": -77.2 }
