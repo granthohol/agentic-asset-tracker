@@ -63,7 +63,7 @@ public class GraphService {
         try(Session session = driver.session()) {
             Result res = session.run(
                 """
-                MATCH (o:Objectives)
+                MATCH (o:Objective)
                 RETURN o
                 ORDER BY o.id
                 """
@@ -99,6 +99,28 @@ public class GraphService {
             ));
         }
     }
+
+    public Optional<SquadronNode> getSquadronById(String id) {
+        try (Session session = driver.session()) {
+            Result res = session.run("MATCH (s:Squadron {id: $id}) RETURN s", Values.parameters("id", id));
+            if (!res.hasNext()) {
+                return Optional.empty();
+            }
+            return Optional.of(mapSquadronNode(res.next().get("s").asNode()));
+        }
+    }
+
+    public Optional<ObjectiveNode> getObjectiveById(String id) {
+        try (Session session = driver.session()) {
+            Result res = session.run("MATCH (o:Objective {id: $id}) RETURN o", Values.parameters("id", id));
+            if (!res.hasNext()) {
+                return Optional.empty();
+            }
+            return Optional.of(mapObjectiveNode(res.next().get("o").asNode()));
+        }
+    }
+
+
 
     public List<DroneNode> getDronesInSquadron(String squadId) {
         List<DroneNode> drones = new ArrayList<>();
@@ -241,10 +263,26 @@ public class GraphService {
     }
 
     private ObjectiveNode mapObjectiveNode(Node node) {
+        var centerLatVal = node.get("centerLatitude");
+        Double centerLatitude = centerLatVal.isNull() ? null : centerLatVal.asDouble();
+
+        var centerLngVal = node.get("centerLongitude");
+        Double centerLongitude = centerLngVal.isNull() ? null : centerLngVal.asDouble();
+
+        var targetEntityIdVal = node.get("targetEntityId");
+        String targetEntityId = targetEntityIdVal.isNull() ? null : targetEntityIdVal.asString();
+
+        var radiusVal = node.get("radiusMeters");
+        Double radiusMeters = radiusVal.isNull() ? null : radiusVal.asDouble();
+
         return new ObjectiveNode(
             node.get("id").asString(),
             node.get("name").asString(),
-            node.get("priority").asInt()
+            node.get("priority").asInt(),
+            centerLatitude,
+            centerLongitude,
+            targetEntityId,
+            radiusMeters
         );
     }
     
