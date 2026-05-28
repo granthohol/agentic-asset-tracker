@@ -77,9 +77,15 @@ public class GraphService {
 
     public Optional<DroneDetail> getDroneById(String id){
         try (Session session = driver.session()) {
-            Result res = session.run("MATCH (d:Drone {id: $id})-[:ASSIGNED_TO]->(s:Squadron) OPTIONAL MATCH (s)-[:DEPLOYED_FOR]->(o:Objective) RETURN d, s, o", 
-                                            Values.parameters("id", id)
-            ); 
+            Result res = session.run(
+                """
+                MATCH (d:Drone {id: $id})
+                OPTIONAL MATCH (d)-[:ASSIGNED_TO]->(s:Squadron)
+                OPTIONAL MATCH (s)-[:DEPLOYED_FOR]->(o:Objective)
+                RETURN d, s, o
+                """,
+                Values.parameters("id", id)
+            );
 
             if (!res.hasNext()) {
                 return Optional.empty();
@@ -87,15 +93,20 @@ public class GraphService {
 
             Record rec = res.next();
 
-            ObjectiveNode obj = null; 
-            if (!rec.get("o").isNull()){
-                obj = mapObjectiveNode(rec.get("o").asNode());
+            SquadronNode squadron = null;
+            if (!rec.get("s").isNull()) {
+                squadron = mapSquadronNode(rec.get("s").asNode());
+            }
+
+            ObjectiveNode objective = null;
+            if (!rec.get("o").isNull()) {
+                objective = mapObjectiveNode(rec.get("o").asNode());
             }
 
             return Optional.of(new DroneDetail(
                 mapDroneNode(rec.get("d").asNode()),
-                mapSquadronNode(rec.get("s").asNode()),
-                obj
+                squadron,
+                objective
             ));
         }
     }
@@ -180,7 +191,7 @@ public class GraphService {
         try (Session session = driver.session()) {
             Result res = session.run(
                 """
-                MATCH (d:Drone)-[:ASSIGNED_TO]->(s {sectorId: $sectorId}) WHERE
+                MATCH (d:Drone)-[:ASSIGNED_TO]->(s:Squadron {sectorId: $sectorId}) WHERE
                 d.batteryLevel < $threshold
                 Return d
                 """,
