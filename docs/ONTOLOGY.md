@@ -105,8 +105,8 @@ Abstract / standby:
 
 | Relationship | Pattern | Meaning |
 |--------------|---------|---------|
-| **ASSIGNED_TO** | `(:Drone)-[:ASSIGNED_TO]->(:Squadron)` | Drone is assigned to exactly one squadron. |
-| **DEPLOYED_FOR** | `(:Squadron)-[:DEPLOYED_FOR]->(:Objective)` | Squadron is deployed for an objective (if any). |
+| **ASSIGNED_TO** | `(:Drone)-[:ASSIGNED_TO]->(:Squadron)` | Drone is assigned to a squadron when configured; absent until assigned. At most one edge per drone. |
+| **DEPLOYED_FOR** | `(:Squadron)-[:DEPLOYED_FOR]->(:Objective)` | Squadron is deployed for an objective (if any). At most one edge per squadron. |
 
 ```cypher
 (:Drone)-[:ASSIGNED_TO]->(:Squadron)
@@ -117,13 +117,25 @@ Abstract / standby:
 
 ## Rules
 
-1. A **Drone** has exactly one **Squadron**; a **Squadron** has zero or one active **Objective**.
-2. **`Drone.id`** is the same string the [telemetry contract](TELEMETRY.md) already uses (e.g. `drone-042`). **Squadron** and **Objective** IDs are server-assigned at seed time.
+1. A **configured Drone** has at most one **Squadron** (`ASSIGNED_TO`); a **Squadron** has at most one active **Objective** (`DEPLOYED_FOR`). Newly discovered drones may exist in the graph **without** a squadron until explicitly assigned.
+2. **`Drone.id`** is the same string the [telemetry contract](TELEMETRY.md) already uses (e.g. `drone-042`). **Squadron** and **Objective** IDs are server-assigned when those nodes are created (seed, admin, or future write-path).
 3. An **Objective**'s location fields are all optional and independently nullable, but only the combinations listed in *Objective location semantics* above are considered valid by the planner.
+
+---
+
+## Drone discovery (telemetry → graph)
+
+When a telemetry event arrives for a drone not yet in Neo4j:
+
+1. **`GraphWriter.upsertDrone`** creates or updates the `:Drone` node (position, battery, status).
+2. **No `ASSIGNED_TO` edge** is created automatically — the drone is **unassigned** until `GraphWriter.assignDroneToSquadron` is called.
+3. **`GraphService.getDroneById`** still returns the drone with `squadron: null` and `objective: null`.
+
+Sector- and squadron-scoped queries (`getDronesInSquadron`, `getLowBatteryDronesInSector`) intentionally return only **assigned** drones.
 
 ---
 
 ## How this fits the pipeline
 
 - **Read path:** Graph queries power LLM tools (`get_drones_in_squadron`, `get_low_battery_drones`, etc.) and `POST /api/plan`. When an objective carries coordinates, the planner can use them as a grounded source of `targetLat / targetLng` for `SET_WAYPOINT` commands.
-- **Write path:** Telemetry upserts drone state; commands update `currentWaypoint`; assignments are seeded or managed separately from the telemetry stream.
+- **Write path:** Telemetry upserts drone state only; commands update `currentWaypoint`; squadron/objective topology and assignments are managed separately (seed, admin, or future write-path).

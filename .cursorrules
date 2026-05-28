@@ -32,16 +32,7 @@ The Build (Project v2.0):
 
 Phase 3: Relational Ontology & Human in the Loop C2
 Focus: Graph data structures, write-paths, and multi-turn Agentic Execution.
-The Build (Project v3.0):
-1. The Graph Ontology: Refactor the Java data model. Replace the single Drone object with a relational node structure. Implement nodes for Drone, Squadron, and Objective, with defined edges (e.g., Drone_A -> assigned_to -> Squadron_1 -> deployed_for -> Objective_X).
-2. Bidirectional C2 (The Write-Path): Implement a command topic in Kafka. Update the Python script to consume this topic. Expose an endpoint in Java to publish command payloads (e.g., set_waypoint(drone_id, lat, lng)).
-3. Agentic Planning (MCP): Build an MCP Server exposing graph traversal tools (e.g., get_squadron_dependencies()). Instead of giving the LLM tools to directly mutate state, configure it to output a "Proposed Execution Plan" (e.g., a structured JSON array of intended waypoint changes).
-4. The HITL Integration Loop: Connect the LLM to your React client.
-    * Prompt: You type a command (e.g., "Send all low-battery drones in Sector A back to base").
-    * Evaluate: The LLM uses MCP to query the current graph state.
-    * Propose: The LLM returns the JSON Execution Plan.
-    * Visualize: The React frontend intercepts this plan and renders "ghost paths" (dotted lines) on the map showing the future state.
-    * Execute: A C2 modal pops up ("Approve Plan?"). Only when you click YES does the React client hit the Java write-path endpoint to actually mutate the physical state.
+
 
 Phase 4: High-Throughput Optimization & Binary Protocol
 Focus: Serialization latency, memory allocation, and client-side rendering bottlenecks.
