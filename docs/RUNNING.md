@@ -139,6 +139,14 @@ python3 producer.py --bootstrap localhost:9092 --topic drone.telemetry.v1
 
 The producer prints per-wave ack stats. Cumulative `ack_err` should stay at `0` against a healthy local broker.
 
+### Command consumer (Phase 3)
+
+`producer.py` now also runs a background thread that consumes `drone.commands.v1`
+and steers drones on `SET_WAYPOINT` (see [docs/COMMANDS.md](COMMANDS.md)). This is
+on by default; pass `--no-consumer` for the Phase 2 telemetry-only behavior. To
+hand-test it, publish a command with the snippet in [infra/run.md](../infra/run.md)
+and watch the targeted marker steer toward the waypoint.
+
 ---
 
 ## 4. Start the Frontend

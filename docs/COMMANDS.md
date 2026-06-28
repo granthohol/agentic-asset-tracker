@@ -39,62 +39,20 @@ Commands are the inverse of telemetry: **intent flows from Java → Kafka → Py
 }
 ```
 
-**Publish path:** `POST /api/commands` validates and publishes to this topic. We **do not** publish from `POST /api/plan` — the plan endpoint is read-only until the operator approves.
+**Publish path:** the **only** publisher to this topic is the Java `CommandPublisher`, called **only** by `PlanExecutor` while executing an approved `ExecutionPlan`. There is no public HTTP endpoint that publishes commands directly (CQRS write seam).
 
 ---
 
-## ExecutionPlan (`POST /api/plan`)
+## ExecutionPlan
 
-The orchestrator returns a **proposed** plan JSON. The React client renders ghost paths from `commands`; only after approval does the client call `POST /api/commands`.
+> **Superseded.** Phase 3 uses a **polymorphic** `ExecutionPlan` (`actions[]` with an
+> `op` discriminator) that intermixes graph mutations and motion, not the old flat
+> `commands[]` shape. The full contract now lives in **[docs/PLAN.md](PLAN.md)**.
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `planId` | string | Correlates this proposal (logging, UI state). |
-| `rationale` | string | Human-readable summary from the planner. |
-| `commands` | array | List of intended waypoint changes (same shape as Kafka commands, plus `reason`). |
-
-Each element of `commands`:
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `droneId` | string | Target drone. |
-| `targetLat` | double | Proposed latitude. |
-| `targetLng` | double | Proposed longitude. |
-| `mission_type` | string | Mission label for this leg. |
-| `reason` | string | Why this drone was included (for the approval modal). |
-
-### Example ExecutionPlan
-
-```json
-{
-  "planId": "plan-2026-05-21-001",
-  "rationale": "Send low-battery drones in Sector 1 back to base.",
-  "commands": [
-    {
-      "droneId": "drone-007",
-      "targetLat": 39.0,
-      "targetLng": -77.2,
-      "mission_type": "RETURN_TO_BASE",
-      "reason": "batteryLevel below threshold in sector-1"
-    },
-    {
-      "droneId": "drone-042",
-      "targetLat": 39.0,
-      "targetLng": -77.2,
-      "mission_type": "RETURN_TO_BASE",
-      "reason": "batteryLevel below threshold in sector-1"
-    }
-  ]
-}
-```
-
-### Request to `POST /api/plan`
-
-```json
-{
-  "command": "Send all low-battery drones in Sector A back to base"
-}
-```
+`SET_WAYPOINT` above is the **internal command-event layer** (Java → Kafka → Python).
+`ExecutionPlan` is the **user-intent layer** (LLM proposal → human approval). They are
+deliberately different: a `setWaypoint` action in a plan is what *eventually* produces a
+`SET_WAYPOINT` command event, but only after approval and only from inside the executor.
 
 ---
 
@@ -102,5 +60,9 @@ Each element of `commands`:
 
 | Method | Path | Mutates state? | Role |
 |--------|------|----------------|------|
-| `POST` | `/api/plan` | No | LLM tool loop → `ExecutionPlan` JSON. |
-| `POST` | `/api/commands` | Yes (via Kafka) | Publishes approved commands to `drone.commands.v1`. |
+| `POST` | `/api/plan` | No | LLM tool loop → proposed `ExecutionPlan` JSON (read-only). See [PLAN.md](PLAN.md). |
+| `POST` | `/api/execute-plan` | No (publishes only) | Validates an **approved** plan and publishes it to the `plan.events` Kafka topic; returns `202 Accepted`. |
+| _(none)_ | ~~`/api/commands`~~ | — | **Removed by design.** Commands are published only by `PlanExecutor` via `CommandPublisher`, never from an HTTP endpoint. |
+
+The actual Neo4j writes and `drone.commands.v1` publishes happen asynchronously in the
+`PlanExecutor` (`@KafkaListener` on `plan.events`) — the single auditable write seam.

@@ -40,11 +40,3 @@ The Build (Project v4.0):
 1. Scale it: Crank your Python script to simulate 1,000 drones updating every 50ms. Your React app will likely crash or lag.
 2. Binary Serialization: JSON parsing string-manipulation overhead will bottleneck the WebSocket at scale. Migrate the WebSocket payload layer from JSON to Protocol Buffers (protobuf) or FlatBuffers. Implement serialization on the Java backend and deserialization on the React client.
 3. Client Render Loop: Profile the React app. Implement React.memo and move state management to Zustand. If DOM manipulation lags, implement a fixed-tick render loop using requestAnimationFrame to decouple incoming WebSocket network events from the browser's render cycle.
-
-
-# Pedagogical Constraints (CRITICAL)
-1. DO NOT write the core business logic or implementation code for me. You are working with me as a guide/tutor. I want to learn these concepts as a personal project, not just implement them as fast as I can.
-2. At the beginning of each "Phase" I will have you sketch out a granular step by step plan for implementation.
-3. I will ask you for the next step in a Phase. You will output the structural requirements, architectural constraints, what we are trying to accomplish, why we are trying to accomplish it, and how it fits into the rest of the project. 
-4. You must first force me to write the actual Java, Python, and TypeScript implementation, but if I ask you for the code, just output the exact code in the chat and tell me where it goes, and explain the code in detail chunk by chunk. 
-5. Explain the *why* behind configurations. Focus on memory allocation, network protocols (TCP/UDP), concurrency, and serialization trade-offs.
