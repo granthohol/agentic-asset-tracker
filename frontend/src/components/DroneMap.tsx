@@ -1,22 +1,11 @@
-import L from 'leaflet';
-
-import icon from 'leaflet/dist/images/marker-icon.png';
-import iconShadow from 'leaflet/dist/images/marker-shadow.png';
-import iconRetina from 'leaflet/dist/images/marker-icon-2x.png';
-
-import {MapContainer, TileLayer, Marker, Popup} from 'react-leaflet';
+import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet';
 import { useState, useEffect } from 'react';
 
 import type { Drone } from '../types/drone'
 import type { ExecutionPlan } from '../types/plan'
-import PlanGhostLayer from './PlanGhostLayer'
-
-delete (L.Icon.Default.prototype as any)._getIconUrl;
-L.Icon.Default.mergeOptions({
-  iconUrl: icon,
-  iconRetinaUrl: iconRetina,
-  shadowUrl: iconShadow,
-});
+import type { AcceptedRoute } from '../types/route'
+import PlanOverlayLayer from './PlanOverlayLayer'
+import { droneIcon } from './droneIcons'
 
 type TelemetryMessage =
 | { type: 'snapshot'; drones: Drone[] }
@@ -24,13 +13,58 @@ type TelemetryMessage =
 
 const WEBSOCKET_URL = "ws://localhost:8080/ws/drones";
 
-interface DroneMapProps {
-    activePlan: ExecutionPlan | null;
+/** Matches edge/producer.py STEP_DEG arrival snap (with a little slack for telemetry lag). */
+const ARRIVAL_DEG = 0.006;
+
+function distanceDegrees(
+    a: { latitude: number; longitude: number },
+    b: { targetLat: number; targetLng: number },
+): number {
+    const dlat = a.latitude - b.targetLat;
+    const dlng = a.longitude - b.targetLng;
+    return Math.hypot(dlat, dlng);
 }
 
-export default function DroneMap({ activePlan }: DroneMapProps) {
+/** Leaflet needs invalidateSize when the map sits in a flex pane instead of full viewport. */
+function MapResizeFix() {
+    const map = useMap();
+    useEffect(() => {
+        const container = map.getContainer();
+        const observer = new ResizeObserver(() => {
+            map.invalidateSize({ animate: false });
+        });
+        observer.observe(container);
+        map.invalidateSize({ animate: false });
+        return () => observer.disconnect();
+    }, [map]);
+    return null;
+}
+
+interface DroneMapProps {
+    pendingPlan: ExecutionPlan | null;
+    acceptedRoutes: AcceptedRoute[];
+    onRoutesCompleted: (completedIds: string[]) => void;
+}
+
+export default function DroneMap({ pendingPlan, acceptedRoutes, onRoutesCompleted }: DroneMapProps) {
     const [, setConnectionStatus] = useState<'Connecting' | 'Open' | 'Closed' | 'Error'>('Connecting');
     const [drones, setDrones] = useState<Map<string, Drone>>(new Map());
+
+    // Drop green overlays once the live drone is within the sim's arrival radius of the target.
+    useEffect(() => {
+        if (acceptedRoutes.length === 0 || drones.size === 0) return;
+        const completed = acceptedRoutes
+            .filter((route) => {
+                const drone = drones.get(route.droneId);
+                if (!drone) return false;
+                return distanceDegrees(drone, route) <= ARRIVAL_DEG;
+            })
+            .map((route) => route.id);
+        if (completed.length > 0) {
+            onRoutesCompleted(completed);
+        }
+    }, [drones, acceptedRoutes, onRoutesCompleted]);
+
     useEffect(() => {
         // Reconnect-with-backoff state, scoped to this effect run.
         let cancelled = false;
@@ -121,30 +155,43 @@ export default function DroneMap({ activePlan }: DroneMapProps) {
 
     return (
         <MapContainer
+            className="drone-map"
             center={[39.0, -77.2]}
-            zoom = {11}
-            style = {{ height: "100vh", width: "100%" }}
-        > 
+            zoom={11}
+            style={{ height: "100%", width: "100%", background: "#0a0a0a" }}
+        >
+            <MapResizeFix />
             <TileLayer
-                attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-                url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-            /> 
+                attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>'
+                url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
+                subdomains="abcd"
+                maxZoom={20}
+            />
             {Array.from(drones.values())
                 .sort((a, b) => a.id.localeCompare(b.id))
                 .map((drone) => (
                 <Marker
-                    key = {drone.id}
-                    position = {[drone.latitude, drone.longitude]}
+                    key={drone.id}
+                    position={[drone.latitude, drone.longitude]}
+                    icon={droneIcon(drone.status)}
                 >
-                    <Popup>
-                        id: {drone.id} <br />
-                        Battery Level: {drone.batteryLevel} <br />
-                        Status: {drone.status}
+                    <Popup className="drone-popup">
+                        <div className="drone-popup__body">
+                            <strong>{drone.id}</strong>
+                            <span>Battery {drone.batteryLevel}%</span>
+                            <span className={`drone-popup__status drone-popup__status--${drone.status.toLowerCase()}`}>
+                                {drone.status}
+                            </span>
+                        </div>
                     </Popup>
                 </Marker>
             ))}
 
-            <PlanGhostLayer plan={activePlan} drones={drones} />
+            <PlanOverlayLayer
+                pendingPlan={pendingPlan}
+                acceptedRoutes={acceptedRoutes}
+                drones={drones}
+            />
 
         </MapContainer>
     );
