@@ -8,6 +8,8 @@ import {MapContainer, TileLayer, Marker, Popup} from 'react-leaflet';
 import { useState, useEffect } from 'react';
 
 import type { Drone } from '../types/drone'
+import type { ExecutionPlan } from '../types/plan'
+import PlanGhostLayer from './PlanGhostLayer'
 
 delete (L.Icon.Default.prototype as any)._getIconUrl;
 L.Icon.Default.mergeOptions({
@@ -22,7 +24,11 @@ type TelemetryMessage =
 
 const WEBSOCKET_URL = "ws://localhost:8080/ws/drones";
 
-export default function DroneMap() {
+interface DroneMapProps {
+    activePlan: ExecutionPlan | null;
+}
+
+export default function DroneMap({ activePlan }: DroneMapProps) {
     const [, setConnectionStatus] = useState<'Connecting' | 'Open' | 'Closed' | 'Error'>('Connecting');
     const [drones, setDrones] = useState<Map<string, Drone>>(new Map());
     useEffect(() => {
@@ -137,6 +143,8 @@ export default function DroneMap() {
                     </Popup>
                 </Marker>
             ))}
+
+            <PlanGhostLayer plan={activePlan} drones={drones} />
 
         </MapContainer>
     );
