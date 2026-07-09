@@ -124,7 +124,7 @@ function App() {
     const plan = missionCard.plan;
     setExecuting(true);
     try {
-      const result = await executePlan(plan);
+      await executePlan(plan);
       approvedPlanRef.current = plan;
       const formUp = routesFromPlan(plan, 'FORM_UP');
       const advanceOnly = routesFromPlan(plan, 'ADVANCE');
@@ -132,7 +132,6 @@ function App() {
       setActiveObjectives(objectivesFromPlan(plan));
       setPendingPlan(null);
       setMissionCard((prev) => (prev ? { ...prev, status: 'running' } : null));
-      flash({ kind: 'ok', message: `Plan ${result.planId} accepted for execution` });
     } catch (err) {
       flash({ kind: 'error', message: String(err) });
     } finally {
@@ -156,7 +155,6 @@ function App() {
         await cancelMission(droneIds);
       }
       clearMissionUi();
-      flash({ kind: 'ok', message: 'Mission stopped' });
     } catch (err) {
       flash({ kind: 'error', message: String(err) });
     } finally {

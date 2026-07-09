@@ -3,6 +3,7 @@
   width: 100%;
   height: 100vh;
   overflow: hidden;
+  background: var(--c2-bg);
 }
 
 .app--resizing {
@@ -19,22 +20,22 @@
   height: 100%;
   min-width: 0;
   overflow: hidden;
+  background: var(--c2-panel);
 }
 
 .app__resizer {
   flex-shrink: 0;
-  width: 6px;
+  width: 5px;
   height: 100%;
   cursor: col-resize;
-  background: rgba(255, 255, 255, 0.06);
-  border-left: 1px solid rgba(255, 255, 255, 0.08);
-  border-right: 1px solid rgba(255, 255, 255, 0.08);
-  transition: background 0.15s;
+  background: var(--c2-line-soft);
+  border: none;
+  transition: background 0.12s ease;
 }
 
 .app__resizer:hover,
 .app--resizing .app__resizer {
-  background: rgba(255, 122, 24, 0.45);
+  background: var(--c2-line);
 }
 
 .app__map {
@@ -77,15 +78,16 @@
 }
 
 .drone-popup .leaflet-popup-content-wrapper {
-  background: #0a0a0a;
-  color: #e8edf4;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 8px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.55);
+  background: var(--c2-panel);
+  color: var(--c2-ink);
+  border: 1px solid var(--c2-line);
+  border-radius: 4px;
+  box-shadow: none;
+  font-family: var(--font-ui);
 }
 
 .drone-popup .leaflet-popup-tip {
-  background: #0a0a0a;
+  background: var(--c2-panel);
 }
 
 .drone-popup .leaflet-popup-content {
@@ -101,251 +103,316 @@
 }
 
 .drone-popup__status--idle {
-  color: #9ca3af;
+  color: var(--c2-mute);
 }
 
 .drone-popup__status--proposed {
-  color: #ff8a1f;
+  color: var(--c2-issue);
 }
 
 .drone-popup__status--executing {
-  color: #3ad17a;
+  color: var(--c2-run);
 }
 
 .drone-map .leaflet-control-zoom a {
-  background: #0a0a0a;
-  color: #e8edf4;
-  border-color: rgba(255, 255, 255, 0.15);
+  background: var(--c2-panel);
+  color: var(--c2-ink);
+  border-color: var(--c2-line);
 }
 
 .drone-map .leaflet-control-attribution {
-  background: rgba(10, 10, 10, 0.75);
-  color: #8a93a3;
+  background: rgba(14, 17, 20, 0.8);
+  color: var(--c2-mute);
+  font-family: var(--font-ui);
 }
 
 .drone-map .leaflet-control-attribution a {
-  color: #b9c2d0;
+  color: var(--c2-ink);
 }
 
-/* ---- Left command panel ---- */
+/* ---- Left C2 plan console ---- */
 .command-panel {
   display: flex;
   flex-direction: column;
   width: 100%;
   height: 100%;
-  color: #e8edf4;
-  background: #000000;
+  color: var(--c2-ink);
+  background: var(--c2-panel);
+  font-family: var(--font-ui);
 }
 
 .command-panel__header {
-  padding: 20px 18px 12px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 14px 12px;
+  border-bottom: 1px solid var(--c2-line);
+}
+
+.command-panel__brand {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+
+.command-panel__mark {
+  font-family: var(--font-data);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  color: var(--c2-faint);
 }
 
 .command-panel__title {
   margin: 0;
-  font-size: 18px;
-  font-weight: 700;
-  color: #f3f6fb;
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--c2-ink);
 }
 
-.command-panel__subtitle {
-  margin: 6px 0 0;
-  font-size: 13px;
-  line-height: 1.4;
-  color: #8a93a3;
+.command-panel__phase {
+  margin: 0;
+  flex-shrink: 0;
+  font-family: var(--font-data);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  color: var(--c2-mute);
 }
 
 .command-panel__form {
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  padding: 16px 18px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  gap: 8px;
+  padding: 12px 14px 14px;
+  border-bottom: 1px solid var(--c2-line);
+}
+
+.command-panel__field-label {
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--c2-faint);
 }
 
 .command-panel__input {
   width: 100%;
-  box-sizing: border-box;
-  padding: 10px 12px;
-  font: inherit;
-  font-size: 14px;
+  padding: 8px 10px;
+  font-size: 13px;
   line-height: 1.4;
-  color: #e8edf4;
-  background: #0a0a0a;
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  border-radius: 8px;
+  color: var(--c2-ink);
+  background: var(--c2-bg);
+  border: 1px solid var(--c2-line);
+  border-radius: 4px;
   outline: none;
   resize: vertical;
-  min-height: 72px;
+  min-height: 52px;
+  max-height: 120px;
+}
+
+.command-panel__input::placeholder {
+  color: var(--c2-faint);
 }
 
 .command-panel__input:focus {
-  border-color: #ff7a18;
+  border-color: var(--c2-issue);
 }
 
-.command-panel__plan-btn {
+.command-panel__input:disabled {
+  opacity: 0.55;
+}
+
+.command-panel__issue {
   align-self: flex-end;
-  padding: 9px 18px;
-  font-size: 14px;
+  padding: 7px 14px;
+  font-size: 12px;
   font-weight: 600;
-  color: #11161f;
-  background: #ff7a18;
-  border: none;
-  border-radius: 8px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--c2-issue-ink);
+  background: var(--c2-issue);
+  border: 1px solid transparent;
+  border-radius: 4px;
   cursor: pointer;
 }
 
-.command-panel__plan-btn:disabled {
-  opacity: 0.5;
+.command-panel__issue:hover:not(:disabled) {
+  filter: brightness(1.06);
+}
+
+.command-panel__issue:disabled {
+  opacity: 0.4;
   cursor: not-allowed;
+  filter: none;
 }
 
 .command-panel__body {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  padding: 16px 18px;
+  padding: 14px;
 }
 
-.command-panel__status {
+.command-panel__idle {
   margin: 0;
-  font-size: 13px;
-  line-height: 1.45;
-  color: #8a93a3;
+  font-family: var(--font-data);
+  font-size: 12px;
+  color: var(--c2-faint);
 }
 
-.command-panel__puck {
-  padding: 16px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 12px;
-  background: linear-gradient(180deg, #111111 0%, #0a0a0a 100%);
+/* Mission ticket */
+.command-panel__ticket {
+  position: relative;
+  padding: 12px 12px 12px 14px;
+  background: var(--c2-panel-raised);
+  border: 1px solid var(--c2-line);
+  border-radius: 2px;
+  border-left: 3px solid var(--c2-line);
 }
 
-.command-panel__puck-top {
+.command-panel__ticket--proposed {
+  border-left-color: var(--c2-issue);
+}
+
+.command-panel__ticket--running {
+  border-left-color: var(--c2-run);
+}
+
+.command-panel__ticket-head {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 12px;
+  gap: 10px;
 }
 
-.command-panel__puck-summary {
+.command-panel__ticket-title {
   margin: 0;
   flex: 1;
-  font-size: 15px;
-  font-weight: 650;
+  font-size: 14px;
+  font-weight: 600;
   line-height: 1.3;
-  letter-spacing: -0.01em;
-  color: #f3f6fb;
+  color: var(--c2-ink);
 }
 
-.command-panel__puck-details {
-  margin: 14px 0 0;
-  padding: 12px 0 0;
-  border-top: 1px solid rgba(255, 255, 255, 0.08);
+.command-panel__ticket-status {
+  flex-shrink: 0;
+  font-family: var(--font-data);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--c2-mute);
+}
+
+.command-panel__ticket--proposed .command-panel__ticket-status {
+  color: var(--c2-issue);
+}
+
+.command-panel__ticket--running .command-panel__ticket-status {
+  color: var(--c2-run);
+}
+
+.command-panel__ticket-details {
+  margin: 12px 0 0;
+  padding: 10px 0 0;
+  border-top: 1px solid var(--c2-line-soft);
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 6px;
 }
 
-.command-panel__puck-row {
+.command-panel__ticket-row {
   display: grid;
-  grid-template-columns: 72px 1fr;
-  gap: 10px;
+  grid-template-columns: 64px 1fr;
+  gap: 8px;
   align-items: baseline;
 }
 
-.command-panel__puck-row dt {
+.command-panel__ticket-row dt {
   margin: 0;
   font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  color: #6b7380;
+  font-weight: 500;
+  color: var(--c2-faint);
 }
 
-.command-panel__puck-row dd {
+.command-panel__ticket-row dd {
   margin: 0;
-  font-size: 13px;
+  font-family: var(--font-data);
+  font-size: 12px;
   line-height: 1.35;
-  color: #c5cdd8;
+  color: var(--c2-ink);
   font-variant-numeric: tabular-nums;
 }
 
-.command-panel__badge {
-  flex-shrink: 0;
-  padding: 4px 9px;
-  font-size: 10px;
-  font-weight: 700;
+.command-panel__actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--c2-line-soft);
+}
+
+.c2-btn {
+  padding: 6px 12px;
+  font-size: 12px;
+  font-weight: 600;
   letter-spacing: 0.04em;
   text-transform: uppercase;
-  border-radius: 999px;
-}
-
-.command-panel__badge--proposed {
-  color: #ff8a1f;
-  background: rgba(255, 138, 31, 0.12);
-  border: 1px solid rgba(255, 138, 31, 0.32);
-}
-
-.command-panel__badge--running {
-  color: #3ad17a;
-  background: rgba(58, 209, 122, 0.12);
-  border: 1px solid rgba(58, 209, 122, 0.32);
-}
-
-.command-panel__buttons {
-  display: flex;
-  gap: 10px;
-  justify-content: flex-end;
-  margin-top: 16px;
-  padding-top: 14px;
-  border-top: 1px solid rgba(255, 255, 255, 0.08);
-}
-
-.btn {
-  padding: 9px 14px;
-  font-size: 13px;
-  font-weight: 600;
-  border: none;
-  border-radius: 8px;
+  border-radius: 4px;
+  border: 1px solid var(--c2-line);
   cursor: pointer;
+  background: transparent;
+  color: var(--c2-ink);
 }
 
-.btn:disabled {
-  opacity: 0.5;
+.c2-btn:disabled {
+  opacity: 0.4;
   cursor: not-allowed;
 }
 
-.btn--reject {
-  color: #e8edf4;
-  background: rgba(255, 255, 255, 0.08);
+.c2-btn--ghost {
+  color: var(--c2-mute);
+  background: transparent;
 }
 
-.btn--approve {
-  color: #0a1a0d;
-  background: #3ad17a;
+.c2-btn--ghost:hover:not(:disabled) {
+  color: var(--c2-ink);
+  border-color: var(--c2-mute);
 }
 
-.btn--stop {
+.c2-btn--accept {
+  color: #0c1610;
+  background: var(--c2-run);
+  border-color: var(--c2-run);
+}
+
+.c2-btn--accept:hover:not(:disabled) {
+  filter: brightness(1.06);
+}
+
+.c2-btn--abort {
   color: #fff;
-  background: #e04848;
+  background: var(--c2-abort);
+  border-color: var(--c2-abort);
 }
 
-.command-panel__toast {
-  margin: 0 18px 18px;
-  padding: 10px 12px;
-  font-size: 13px;
+.c2-btn--abort:hover:not(:disabled) {
+  filter: brightness(1.06);
+}
+
+.command-panel__fault {
+  margin: 0;
+  padding: 8px 14px;
+  border-top: 1px solid var(--c2-line);
+  font-family: var(--font-data);
+  font-size: 11px;
   line-height: 1.4;
-  border-radius: 8px;
-}
-
-.command-panel__toast--ok {
-  color: #0a1a0d;
-  background: #3ad17a;
-}
-
-.command-panel__toast--error {
-  color: #fff;
-  background: #e04848;
+  color: var(--c2-fault);
+  background: rgba(196, 74, 74, 0.08);
 }

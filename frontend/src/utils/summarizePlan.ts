@@ -82,7 +82,7 @@ export function summarizePlan(plan: ExecutionPlan): PlanSummary {
         && objective.centerLongitude != null
     ) {
         details.push({
-            label: "Location",
+            label: "Loc",
             value: `${formatCoord(objective.centerLatitude)}, ${formatCoord(objective.centerLongitude)}`,
         });
     }
@@ -97,11 +97,11 @@ export function summarizePlan(plan: ExecutionPlan): PlanSummary {
     const formation = inferFormation(plan);
     const kind = inferMissionKind(plan);
     if (formation && kind) {
-        details.push({ label: "Mission", value: `${titleCaseMission(formation)} · ${kind}` });
+        details.push({ label: "Type", value: `${titleCaseMission(formation)} · ${kind}` });
     } else if (formation) {
-        details.push({ label: "Mission", value: titleCaseMission(formation) });
+        details.push({ label: "Type", value: titleCaseMission(formation) });
     } else if (kind) {
-        details.push({ label: "Mission", value: kind });
+        details.push({ label: "Type", value: kind });
     }
 
     return { summary, details };

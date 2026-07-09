@@ -14,8 +14,22 @@ interface CommandPanelProps {
     onStop: () => void;
 }
 
+function headerStatus(
+    planning: boolean,
+    executing: boolean,
+    stopping: boolean,
+    missionCard: MissionCard | null,
+): string {
+    if (stopping) return "Aborting";
+    if (planning) return "Planning";
+    if (executing) return "Dispatching";
+    if (missionCard?.status === "running") return "Executing";
+    if (missionCard?.status === "proposed") return "Awaiting approval";
+    return "Agent ready";
+}
+
 /**
- * Left-rail HITL surface: command input + compact plan puck (accept/reject/stop).
+ * Left-rail C2 plan console: create plans, review ticket, accept / abort.
  */
 export default function CommandPanel({
     planning,
@@ -31,6 +45,8 @@ export default function CommandPanel({
     const [command, setCommand] = useState("");
     const missionRunning = missionCard?.status === "running";
     const busy = planning || executing || stopping || missionRunning;
+    const status = headerStatus(planning, executing, stopping, missionCard);
+    const fault = toast?.kind === "error" ? toast.message : null;
 
     const submit = (e: FormEvent) => {
         e.preventDefault();
@@ -43,65 +59,68 @@ export default function CommandPanel({
     return (
         <aside className="command-panel">
             <header className="command-panel__header">
-                <h1 className="command-panel__title">Command</h1>
-                <p className="command-panel__subtitle">Plan with the agent, approve before execute.</p>
+                <div className="command-panel__brand">
+                    <span className="command-panel__mark">C2</span>
+                    <h1 className="command-panel__title">Plans</h1>
+                </div>
+                <p className="command-panel__phase">{status}</p>
             </header>
 
             <form className="command-panel__form" onSubmit={submit}>
+                <label className="command-panel__field-label" htmlFor="plan-command">
+                    Command
+                </label>
                 <textarea
+                    id="plan-command"
                     className="command-panel__input"
-                    rows={3}
-                    placeholder='e.g. "Observe the disturbance at 39.05,-77.18"'
+                    rows={2}
+                    placeholder="Agent ready. Plan a mission."
                     value={command}
                     onChange={(e) => setCommand(e.target.value)}
                     disabled={busy}
                 />
                 <button
-                    className="command-panel__plan-btn"
+                    className="command-panel__issue"
                     type="submit"
                     disabled={busy || !command.trim()}
                 >
-                    {planning ? "Planning…" : "Plan"}
+                    {planning ? "Planning…" : "Create Plan"}
                 </button>
             </form>
 
             <div className="command-panel__body">
-                {planning && !missionCard && (
-                    <p className="command-panel__status">Running planner tools…</p>
-                )}
-
-                {!planning && !missionCard && (
-                    <p className="command-panel__status">
-                        Type a command above. Proposed plans appear here as a compact card.
-                    </p>
+                {!missionCard && !planning && (
+                    <p className="command-panel__idle">No Active Plans</p>
                 )}
 
                 {missionCard && (
-                    <section className="command-panel__puck">
-                        <div className="command-panel__puck-top">
-                            <p className="command-panel__puck-summary">{missionCard.summary}</p>
-                            <span
-                                className={`command-panel__badge command-panel__badge--${missionCard.status}`}
-                            >
+                    <section
+                        className={`command-panel__ticket command-panel__ticket--${missionCard.status}`}
+                    >
+                        <div className="command-panel__ticket-head">
+                            <p className="command-panel__ticket-title">{missionCard.summary}</p>
+                            <span className="command-panel__ticket-status">
                                 {missionCard.status === "proposed" ? "Proposed" : "Running"}
                             </span>
                         </div>
+
                         {missionCard.details.length > 0 && (
-                            <dl className="command-panel__puck-details">
+                            <dl className="command-panel__ticket-details">
                                 {missionCard.details.map((d) => (
-                                    <div key={d.label} className="command-panel__puck-row">
+                                    <div key={d.label} className="command-panel__ticket-row">
                                         <dt>{d.label}</dt>
                                         <dd>{d.value}</dd>
                                     </div>
                                 ))}
                             </dl>
                         )}
-                        <div className="command-panel__buttons">
+
+                        <div className="command-panel__actions">
                             {missionCard.status === "proposed" && (
                                 <>
                                     <button
                                         type="button"
-                                        className="btn btn--reject"
+                                        className="c2-btn c2-btn--ghost"
                                         onClick={onReject}
                                         disabled={executing}
                                     >
@@ -109,7 +128,7 @@ export default function CommandPanel({
                                     </button>
                                     <button
                                         type="button"
-                                        className="btn btn--approve"
+                                        className="c2-btn c2-btn--accept"
                                         onClick={onAccept}
                                         disabled={executing}
                                     >
@@ -120,11 +139,11 @@ export default function CommandPanel({
                             {missionCard.status === "running" && (
                                 <button
                                     type="button"
-                                    className="btn btn--stop"
+                                    className="c2-btn c2-btn--abort"
                                     onClick={onStop}
                                     disabled={stopping}
                                 >
-                                    {stopping ? "Stopping…" : "Stop"}
+                                    {stopping ? "Aborting…" : "Abort"}
                                 </button>
                             )}
                         </div>
@@ -132,9 +151,9 @@ export default function CommandPanel({
                 )}
             </div>
 
-            {toast && (
-                <div className={`command-panel__toast command-panel__toast--${toast.kind}`}>
-                    {toast.message}
+            {fault && (
+                <div className="command-panel__fault" role="alert">
+                    {fault}
                 </div>
             )}
         </aside>
