@@ -102,3 +102,9 @@ The record types themselves stay pure data so the parse step is a faithful mirro
 - `com.assettracker.backend.agent.plan.PlanAction` — `sealed interface` with one nested `record` per `op`, dispatched via Jackson `@JsonTypeInfo(use = NAME, property = "op")` + `@JsonSubTypes`.
 
 Adding a capability = adding one permitted record + one `@JsonSubTypes.Type` + one executor dispatch case. Nothing else can become executable by accident.
+
+---
+
+## Formations (planner tools, not plan ops)
+
+Swarm layouts are computed by read-only tools (`list_formations`, `preview_formation`) — see [FORMATIONS.md](FORMATIONS.md). The plan still executes as N× `setWaypoint`; there is no `formFormation` op.

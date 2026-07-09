@@ -1,7 +1,5 @@
 package com.assettracker.backend.graph;
 
-import java.util.Map;
-
 import org.neo4j.driver.Driver;
 import org.neo4j.driver.Result;
 import org.neo4j.driver.Session;
@@ -80,20 +78,23 @@ public class GraphWriter {
 
     public void setDroneWaypoint(String droneId, Waypoint waypoint) {
         try (Session session = driver.session()) {
-            // Waypoint record can't be auto-serialized by the driver, so hand
-            // it a Map with the short keys the reader (mapDroneNode) expects.
-            Map<String, Object> waypointMap = Map.of(
-                "lat", waypoint.latitude(),
-                "lng", waypoint.longitude()
-            );
-            session.run("MATCH (d:Drone {id:$d}) SET d.currentWaypoint = $waypoint",
-                Values.parameters("d", droneId, "waypoint", waypointMap));
+            // Neo4j node properties cannot be nested maps — store lat/lng as primitives.
+            session.run(
+                "MATCH (d:Drone {id:$d}) "
+                    + "SET d.currentWaypointLat = $lat, d.currentWaypointLng = $lng "
+                    + "REMOVE d.currentWaypoint",
+                Values.parameters(
+                    "d", droneId,
+                    "lat", waypoint.latitude(),
+                    "lng", waypoint.longitude()));
         }
     }
 
     public void clearDroneWaypoint(String droneId) {
         try (Session session = driver.session()) {
-            session.run("MATCH (d:Drone {id:$d}) REMOVE d.currentWaypoint",
+            session.run(
+                "MATCH (d:Drone {id:$d}) "
+                    + "REMOVE d.currentWaypoint, d.currentWaypointLat, d.currentWaypointLng",
                 Values.parameters("d", droneId));
         }
     }

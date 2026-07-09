@@ -54,6 +54,7 @@ export default function CommandPanel({
     onReject,
 }: CommandPanelProps) {
     const [command, setCommand] = useState("");
+    const swarmCount = pendingPlan?.actions.filter((a) => a.op === "setWaypoint").length ?? 0;
 
     const submit = (e: FormEvent) => {
         e.preventDefault();
@@ -106,6 +107,12 @@ export default function CommandPanel({
                         </div>
 
                         <p className="command-panel__rationale">{pendingPlan.rationale}</p>
+
+                        {swarmCount >= 2 && (
+                            <div className="command-panel__swarm-chip">
+                                Swarm: {swarmCount} drones
+                            </div>
+                        )}
 
                         <ol className="command-panel__actions">
                             {pendingPlan.actions.map((action, i) => (

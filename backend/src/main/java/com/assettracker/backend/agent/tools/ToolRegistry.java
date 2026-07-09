@@ -1,11 +1,15 @@
 package com.assettracker.backend.agent.tools;
 
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 import org.springframework.stereotype.Component;
 
+import com.assettracker.backend.agent.formation.FormationService;
+import com.assettracker.backend.agent.formation.FormationType;
 import com.assettracker.backend.graph.GraphService;
 import com.assettracker.backend.model.DroneStatus;
 import com.fasterxml.jackson.core.JsonProcessingException;
@@ -19,7 +23,8 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
  * invoke them by name and to emit their provider-facing specs.
  *
  * <p><b>Architectural invariant:</b> this class (and the whole {@code agent} package)
- * depends only on {@link GraphService} (reads). It must never import
+ * depends only on {@link GraphService} (reads) and other read-only helpers such as
+ * {@link FormationService}. It must never import
  * {@code com.assettracker.backend.graph.GraphWriter}. That lexical boundary is what makes
  * "the LLM can read but never mutate" a guarantee rather than a hope.
  *
@@ -30,11 +35,13 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 public class ToolRegistry {
 
     private final GraphService graph;
+    private final FormationService formations;
     private final ObjectMapper mapper;
     private final Map<String, Tool> tools = new LinkedHashMap<>();
 
-    public ToolRegistry(GraphService graph, ObjectMapper mapper) {
+    public ToolRegistry(GraphService graph, FormationService formations, ObjectMapper mapper) {
         this.graph = graph;
+        this.formations = formations;
         this.mapper = mapper;
         registerAll();
     }
@@ -123,6 +130,49 @@ public class ToolRegistry {
                 "lat", "lng", "radiusKm"
             ),
             args -> mapper.valueToTree(graph.getDronesNear(requireDouble(args, "lat"), requireDouble(args, "lng"), requireDouble(args, "radiusKm")))
+        ));
+
+        register(new Tool(
+            "list_formations",
+            "List named geometric formations the planner can use for swarm routing (RING, WEDGE, LINE). "
+                + "Call this before preview_formation when the operator asks for a swarm or formation. "
+                + "Formations are read-only previews — emit setWaypoint actions from the preview slots; do not invent offsets.",
+            objectSchema(props()),
+            args -> mapper.valueToTree(formations.listSpecs())
+        ));
+
+        ObjectNode droneIdsField = field("array", "Ordered drone ids to place into formation slots (from list_drones).");
+        droneIdsField.set("items", field("string", "A drone id, e.g. 'drone-000'."));
+
+        register(new Tool(
+            "preview_formation",
+            "Compute concrete target lat/lng for each drone in a formation around a center. "
+                + "Optional facingLatitude/facingLongitude rotate the formation so WEDGE/LINE point "
+                + "at that location (RING is unchanged visually). "
+                + "Returns slots[{index, droneId, targetLat, targetLng}]. "
+                + "Emit setWaypoint per slot (FORM_UP then ADVANCE for two-phase swarms). "
+                + "Does not move drones — planning only.",
+            objectSchema(
+                props(
+                    "type", enumField("Formation type from list_formations.", "RING", "WEDGE", "LINE"),
+                    "centerLatitude", field("number", "Formation center latitude."),
+                    "centerLongitude", field("number", "Formation center longitude."),
+                    "droneIds", droneIdsField,
+                    "spacingMeters", field("number", "Optional spacing between slots in meters (default ~200)."),
+                    "facingLatitude", field("number", "Optional point the formation should face (e.g. AOI lat)."),
+                    "facingLongitude", field("number", "Optional point the formation should face (e.g. AOI lng).")
+                ),
+                "type", "centerLatitude", "centerLongitude", "droneIds"
+            ),
+            args -> mapper.valueToTree(formations.preview(
+                FormationType.parse(requireString(args, "type")),
+                requireDouble(args, "centerLatitude"),
+                requireDouble(args, "centerLongitude"),
+                requireStringList(args, "droneIds"),
+                optDouble(args, "spacingMeters"),
+                optDouble(args, "facingLatitude"),
+                optDouble(args, "facingLongitude")
+            ))
         ));
     }
 
@@ -238,6 +288,35 @@ public class ToolRegistry {
             throw new IllegalArgumentException("Missing or non-numeric required argument: " + key);
         }
         return v.asDouble();
+    }
+
+    private Double optDouble(JsonNode args, String key) {
+        JsonNode v = args.get(key);
+        if (v == null || v.isNull()) {
+            return null;
+        }
+        if (!v.isNumber()) {
+            throw new IllegalArgumentException("Non-numeric optional argument: " + key);
+        }
+        return v.asDouble();
+    }
+
+    private List<String> requireStringList(JsonNode args, String key) {
+        JsonNode v = args.get(key);
+        if (v == null || v.isNull() || !v.isArray()) {
+            throw new IllegalArgumentException("Missing or non-array required argument: " + key);
+        }
+        List<String> out = new ArrayList<>();
+        for (JsonNode el : v) {
+            if (el == null || el.isNull()) {
+                continue;
+            }
+            out.add(el.asText());
+        }
+        if (out.isEmpty()) {
+            throw new IllegalArgumentException(key + " must contain at least one string");
+        }
+        return out;
     }
 
     private ObjectNode notFound(String idKey, String idValue) {

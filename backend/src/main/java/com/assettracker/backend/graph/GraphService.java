@@ -243,15 +243,12 @@ public class GraphService {
     private DroneNode mapDroneNode(Node node) {
         DroneStatus status = DroneStatus.valueOf(node.get("status").asString());
     
-        // map from node.get("currentWaypoint") if present
-        Waypoint currentWaypoint = null; 
-        var wp = node.get("currentWaypoint");
-        if (!wp.isNull()) {
-            var map = wp.asMap();
-            currentWaypoint = new Waypoint(
-                ((Number) map.get("lat")).doubleValue(),
-                ((Number) map.get("lng")).doubleValue()
-            );
+        // Prefer flat primitive properties (Neo4j cannot store nested maps on nodes).
+        Waypoint currentWaypoint = null;
+        var lat = node.get("currentWaypointLat");
+        var lng = node.get("currentWaypointLng");
+        if (!lat.isNull() && !lng.isNull()) {
+            currentWaypoint = new Waypoint(lat.asDouble(), lng.asDouble());
         }
 
         return new DroneNode(

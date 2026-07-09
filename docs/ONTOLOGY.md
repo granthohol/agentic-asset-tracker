@@ -8,7 +8,7 @@ We model the fleet as a **graph** in Neo4j, not a flat list of drones. Nodes hol
 
 | Node | Fields | Notes |
 |------|--------|-------|
-| **Drone** | `id`, `latitude`, `longitude`, `batteryLevel`, `status`, `currentWaypoint?` | `currentWaypoint` is optional; set when a command steers the drone toward a target. |
+| **Drone** | `id`, `latitude`, `longitude`, `batteryLevel`, `status`, `currentWaypointLat?`, `currentWaypointLng?` | Optional waypoint stored as **flat primitives** (Neo4j node props cannot be nested maps). Set when a command steers the drone toward a target. |
 | **Squadron** | `id`, `name`, `sectorId` | Groups drones by operational area (e.g. sector for planner queries). |
 | **Objective** | `id`, `name`, `priority`, `centerLatitude?`, `centerLongitude?`, `targetEntityId?`, `radiusMeters?` | Mission the squadron is deployed for. Location fields are all optional — many objectives have no fixed location (see below). |
 
@@ -21,7 +21,8 @@ We model the fleet as a **graph** in Neo4j, not a flat list of drones. Nodes hol
   "longitude": -77.123456,
   "batteryLevel": 87,
   "status": "ACTIVE",
-  "currentWaypoint": { "lat": 39.0, "lng": -77.2 }
+  "currentWaypointLat": 39.0,
+  "currentWaypointLng": -77.2
 }
 ```
 
@@ -138,4 +139,4 @@ Sector- and squadron-scoped queries (`getDronesInSquadron`, `getLowBatteryDrones
 ## How this fits the pipeline
 
 - **Read path:** Graph queries power LLM tools (`get_drones_in_squadron`, `get_low_battery_drones`, etc.) and `POST /api/plan`. When an objective carries coordinates, the planner can use them as a grounded source of `targetLat / targetLng` for `SET_WAYPOINT` commands.
-- **Write path:** Telemetry upserts drone state only; commands update `currentWaypoint`; squadron/objective topology and assignments are managed separately (seed, admin, or future write-path).
+- **Write path:** Telemetry upserts drone state only; commands update `currentWaypointLat` / `currentWaypointLng`; squadron/objective topology and assignments are managed separately (seed, admin, or future write-path).

@@ -50,6 +50,14 @@ public class AgentOrchestrationService {
         real ids and real state before you plan. Never invent ids for entities that are not
         already present in tool results.
 
+        Swarm / formation requests: call list_formations, pick a type (RING, WEDGE, LINE).
+        Choose drones from the prompt: explicit ids (drone-000, …), or a count ("5 drones"),
+        otherwise use ALL drones from list_drones. Form up AWAY from the AOI first:
+        preview_formation at a standoff center near the leader (first selected id), emit
+        setWaypoint with mission_type FORM_UP per slot. Then preview_formation again centered
+        on the AOI with the same drone order, emit setWaypoint with mission_type ADVANCE.
+        Do not invent offsets — use preview slots only.
+
         When you are done, output ONE JSON object that is an ExecutionPlan:
           { "planId": string, "rationale": string, "actions": PlanAction[] }
 

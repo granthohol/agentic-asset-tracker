@@ -27,4 +27,9 @@ public class DroneService {
         return drones;
     }
 
+    /** Live telemetry snapshot for one drone, or null if unknown. */
+    public Drone getDrone(String droneId) {
+        return droneMap.get(droneId);
+    }
+
 }

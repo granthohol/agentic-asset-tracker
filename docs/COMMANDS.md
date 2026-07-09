@@ -22,9 +22,16 @@ Commands are the inverse of telemetry: **intent flows from Java → Kafka → Py
 | `droneId` | string | Target drone (must match telemetry id space). |
 | `targetLat` | double | Destination latitude. |
 | `targetLng` | double | Destination longitude. |
-| `mission_type` | string | Mission label for the maneuver (e.g. `RETURN_TO_BASE`). |
+| `mission_type` | string | Mission label for the maneuver (see below). |
 | `issuedAt` | number | Unix epoch milliseconds when the command was issued. |
 | `commandId` | string | Unique id for deduplication on the edge consumer. |
+
+### `mission_type` semantics (edge)
+
+| Value | On arrival |
+|-------|------------|
+| `FORM_UP` / `HOLD` | Snap to target and **loiter** (keep waypoint; no random walk). Used for formation assembly. |
+| `ADVANCE` / `RECON` / other | Snap to target and **clear** waypoint (resume free movement). |
 
 ### Example command message value
 
@@ -33,7 +40,7 @@ Commands are the inverse of telemetry: **intent flows from Java → Kafka → Py
   "droneId": "drone-042",
   "targetLat": 39.0,
   "targetLng": -77.2,
-  "mission_type": "RETURN_TO_BASE",
+  "mission_type": "FORM_UP",
   "issuedAt": 1715432100123,
   "commandId": "cmd-8f3a2b1c-4d5e-6f7a-8b9c-0d1e2f3a4b5c"
 }

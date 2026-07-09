@@ -61,10 +61,8 @@
 .drone-marker__diamond {
   position: absolute;
   inset: 2px;
-  background: var(--drone-color);
   transform: rotate(45deg);
   border: 1px solid rgba(255, 255, 255, 0.35);
-  box-shadow: 0 0 10px color-mix(in srgb, var(--drone-color) 70%, transparent);
 }
 
 .drone-marker__core {
@@ -241,6 +239,19 @@
   font-size: 13px;
   line-height: 1.45;
   color: #b9c2d0;
+}
+
+.command-panel__swarm-chip {
+  display: inline-block;
+  margin: 0 0 12px;
+  padding: 4px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: #ff7a18;
+  background: rgba(255, 122, 24, 0.12);
+  border: 1px solid rgba(255, 122, 24, 0.35);
+  border-radius: 999px;
 }
 
 .command-panel__actions {

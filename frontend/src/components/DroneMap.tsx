@@ -50,9 +50,28 @@ export default function DroneMap({ pendingPlan, acceptedRoutes, onRoutesComplete
     const [, setConnectionStatus] = useState<'Connecting' | 'Open' | 'Closed' | 'Error'>('Connecting');
     const [drones, setDrones] = useState<Map<string, Drone>>(new Map());
 
-    // Drop green overlays once the live drone is within the sim's arrival radius of the target.
+    // Clear overlays on arrival. FORM_UP/HOLD loiter — treat "all form-up drones arrived"
+    // as phase-complete so App can swap in ADVANCE routes. ADVANCE clears per-route.
     useEffect(() => {
         if (acceptedRoutes.length === 0 || drones.size === 0) return;
+
+        const isFormUp = (m?: string) => {
+            const t = (m ?? "").toUpperCase();
+            return t === "FORM_UP" || t === "HOLD";
+        };
+
+        const formUps = acceptedRoutes.filter((r) => isFormUp(r.missionType));
+        if (formUps.length > 0) {
+            const allFormed = formUps.every((route) => {
+                const drone = drones.get(route.droneId);
+                return drone != null && distanceDegrees(drone, route) <= ARRIVAL_DEG;
+            });
+            if (allFormed) {
+                onRoutesCompleted(formUps.map((r) => r.id));
+            }
+            return;
+        }
+
         const completed = acceptedRoutes
             .filter((route) => {
                 const drone = drones.get(route.droneId);
@@ -171,7 +190,8 @@ export default function DroneMap({ pendingPlan, acceptedRoutes, onRoutesComplete
                 .sort((a, b) => a.id.localeCompare(b.id))
                 .map((drone) => (
                 <Marker
-                    key={drone.id}
+                    // Remount when status changes so Leaflet picks up the new DivIcon.
+                    key={`${drone.id}-${drone.status}`}
                     position={[drone.latitude, drone.longitude]}
                     icon={droneIcon(drone.status)}
                 >

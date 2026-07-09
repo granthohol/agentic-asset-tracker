@@ -12,19 +12,21 @@ import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
 
+import com.assettracker.backend.agent.formation.FormationService;
 import com.assettracker.backend.graph.DroneNode;
 import com.assettracker.backend.graph.GraphService;
 import com.assettracker.backend.graph.SquadronNode;
 import com.assettracker.backend.model.DroneStatus;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
 class ToolRegistryTest {
 
     private final GraphService graph = Mockito.mock(GraphService.class);
     private final ObjectMapper mapper = new ObjectMapper();
-    private final ToolRegistry registry = new ToolRegistry(graph, mapper);
+    private final ToolRegistry registry = new ToolRegistry(graph, new FormationService(), mapper);
 
     @Test
     void specsAreWellFormedAndCoverTheReadApi() {
@@ -35,7 +37,8 @@ class ToolRegistryTest {
         assertThat(names).contains(
             "list_squadrons", "list_objectives", "list_drones", "get_drone_by_id",
             "get_drones_in_squadron", "get_drones_by_status", "get_low_battery_drones",
-            "get_low_battery_drones_in_sector", "get_squadrons_for_objective", "get_drones_near"
+            "get_low_battery_drones_in_sector", "get_squadrons_for_objective", "get_drones_near",
+            "list_formations", "preview_formation"
         );
 
         for (JsonNode spec : specs) {
@@ -59,6 +62,47 @@ class ToolRegistryTest {
         assertThat(result.isArray()).isTrue();
         assertThat(result.get(0).get("id").asText()).isEqualTo("squadron-alpha");
         assertThat(result.get(0).get("sectorId").asText()).isEqualTo("sector-1");
+    }
+
+    @Test
+    void invokeListFormationsReturnsCatalog() {
+        JsonNode result = registry.invoke("list_formations", null);
+        assertThat(result.isArray()).isTrue();
+        assertThat(result).hasSize(3);
+        assertThat(result.findValuesAsText("type")).contains("RING", "WEDGE", "LINE");
+    }
+
+    @Test
+    void invokePreviewFormationHappyPath() {
+        ObjectNode args = mapper.createObjectNode();
+        args.put("type", "RING");
+        args.put("centerLatitude", 39.05);
+        args.put("centerLongitude", -77.18);
+        ArrayNode ids = args.putArray("droneIds");
+        ids.add("drone-000");
+        ids.add("drone-001");
+        ids.add("drone-002");
+
+        JsonNode result = registry.invoke("preview_formation", args);
+
+        assertThat(result.get("type").asText()).isEqualTo("RING");
+        assertThat(result.get("slots")).hasSize(3);
+        assertThat(result.get("slots").get(0).get("droneId").asText()).isEqualTo("drone-000");
+        assertThat(result.get("slots").get(0).has("targetLat")).isTrue();
+        assertThat(result.get("slots").get(0).has("targetLng")).isTrue();
+    }
+
+    @Test
+    void invokePreviewFormationBadTypeThrows() {
+        ObjectNode args = mapper.createObjectNode();
+        args.put("type", "SPIRAL");
+        args.put("centerLatitude", 39.05);
+        args.put("centerLongitude", -77.18);
+        args.putArray("droneIds").add("drone-000");
+
+        assertThatThrownBy(() -> registry.invoke("preview_formation", args))
+            .isInstanceOf(IllegalArgumentException.class)
+            .hasMessageContaining("Unknown formation type");
     }
 
     @Test

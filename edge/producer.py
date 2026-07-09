@@ -71,14 +71,22 @@ class SimulatedDrone:
         self.battery_level = max(0, min(100, self.battery_level + random.randint(-2, 1)))
 
     def _steer_toward_target(self) -> None:
-        """Move up to STEP_DEG toward (target_lat, target_lng); clear on arrival."""
+        """Move up to STEP_DEG toward (target_lat, target_lng).
+
+        On arrival: FORM_UP / HOLD keep the target so the drone loiters (no random walk).
+        Other mission types clear the waypoint and resume free movement.
+        """
         dlat = self.target_lat - self.latitude
         dlng = self.target_lng - self.longitude
         dist = math.hypot(dlat, dlng)
         if dist <= STEP_DEG:
-            # Close enough: snap to the target and drop the waypoint (mission done).
+            # Close enough: snap to the target.
             self.latitude = self.target_lat
             self.longitude = self.target_lng
+            mission = (self.mission_type or "").upper()
+            if mission in ("FORM_UP", "HOLD"):
+                # Keep target_* set so step_physics keeps calling steer (loiter).
+                return
             self.target_lat = None
             self.target_lng = None
             self.mission_type = None

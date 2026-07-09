@@ -20,9 +20,17 @@ function clampPanelPct(pct: number): number {
   return Math.min(PANEL_PCT_MAX, Math.max(PANEL_PCT_MIN, pct));
 }
 
-function routesFromPlan(plan: ExecutionPlan): AcceptedRoute[] {
+function isFormUpMission(missionType?: string): boolean {
+  const m = (missionType ?? '').toUpperCase();
+  return m === 'FORM_UP' || m === 'HOLD';
+}
+
+function routesFromPlan(plan: ExecutionPlan, missionFilter?: 'FORM_UP' | 'ADVANCE'): AcceptedRoute[] {
   return plan.actions.flatMap((action, i) => {
     if (action.op !== 'setWaypoint') return [];
+    const formUp = isFormUpMission(action.mission_type);
+    if (missionFilter === 'FORM_UP' && !formUp) return [];
+    if (missionFilter === 'ADVANCE' && formUp) return [];
     return [{
       id: `${plan.planId}-${i}`,
       droneId: action.droneId,
@@ -42,6 +50,8 @@ function App() {
   const [panelPct, setPanelPct] = useState(PANEL_PCT_DEFAULT);
   const [resizing, setResizing] = useState(false);
   const appRef = useRef<HTMLDivElement>(null);
+  /** Full approved plan kept so we can swap FORM_UP overlays → ADVANCE after form-up. */
+  const approvedPlanRef = useRef<ExecutionPlan | null>(null);
 
   const flash = (t: Toast) => {
     setToast(t);
@@ -66,7 +76,11 @@ function App() {
     setExecuting(true);
     try {
       const result = await executePlan(pendingPlan);
-      setAcceptedRoutes((prev) => [...prev, ...routesFromPlan(pendingPlan)]);
+      approvedPlanRef.current = pendingPlan;
+      const formUp = routesFromPlan(pendingPlan, 'FORM_UP');
+      const advanceOnly = routesFromPlan(pendingPlan, 'ADVANCE');
+      // If the plan has no FORM_UP wave, show all waypoints immediately.
+      setAcceptedRoutes(formUp.length > 0 ? formUp : [...formUp, ...advanceOnly]);
       setPendingPlan(null);
       flash({ kind: 'ok', message: `Plan ${result.planId} accepted for execution` });
     } catch (err) {
@@ -81,7 +95,23 @@ function App() {
   const handleRoutesCompleted = useCallback((completedIds: string[]) => {
     if (completedIds.length === 0) return;
     const done = new Set(completedIds);
-    setAcceptedRoutes((prev) => prev.filter((route) => !done.has(route.id)));
+
+    setAcceptedRoutes((prev) => {
+      const remaining = prev.filter((route) => !done.has(route.id));
+      const completedFormUp = prev.some(
+        (r) => done.has(r.id) && isFormUpMission(r.missionType),
+      );
+      const stillHasFormUp = remaining.some((r) => isFormUpMission(r.missionType));
+
+      // After the last FORM_UP overlay clears, swap in ADVANCE routes from the approved plan.
+      if (completedFormUp && !stillHasFormUp && approvedPlanRef.current) {
+        const advance = routesFromPlan(approvedPlanRef.current, 'ADVANCE');
+        if (advance.length > 0) {
+          return advance;
+        }
+      }
+      return remaining;
+    });
   }, []);
 
   const onResizePointerDown = useCallback((e: ReactPointerEvent<HTMLDivElement>) => {
