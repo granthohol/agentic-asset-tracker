@@ -1,22 +1,23 @@
 import L from "leaflet";
 
-import type { DroneStatus } from "../types/drone";
+/** Visual mission role on the map (not telemetry battery status). */
+export type MissionVisualStatus = "idle" | "proposed" | "executing";
 
-const STATUS_COLOR: Record<DroneStatus, string> = {
-    ACTIVE: "#3ad17a",
-    LOW_BATTERY: "#ffb020",
-    OFFLINE: "#6b7280",
+const MISSION_COLOR: Record<MissionVisualStatus, string> = {
+    idle: "#6b7280",
+    proposed: "#ff8a1f",
+    executing: "#3ad17a",
 };
 
-const iconCache = new Map<DroneStatus, L.DivIcon>();
+const iconCache = new Map<MissionVisualStatus, L.DivIcon>();
 
-/** Compact diamond marker tinted by drone status — color baked into HTML (not CSS vars). */
-export function droneIcon(status: DroneStatus): L.DivIcon {
-    const key = STATUS_COLOR[status] ? status : "ACTIVE";
+/** Compact diamond marker tinted by mission involvement. */
+export function droneIcon(missionStatus: MissionVisualStatus): L.DivIcon {
+    const key = MISSION_COLOR[missionStatus] ? missionStatus : "idle";
     const cached = iconCache.get(key);
     if (cached) return cached;
 
-    const color = STATUS_COLOR[key];
+    const color = MISSION_COLOR[key];
     const icon = L.divIcon({
         className: "drone-marker",
         html:
@@ -32,6 +33,6 @@ export function droneIcon(status: DroneStatus): L.DivIcon {
     return icon;
 }
 
-export function statusColor(status: DroneStatus): string {
-    return STATUS_COLOR[status] ?? STATUS_COLOR.ACTIVE;
+export function missionColor(missionStatus: MissionVisualStatus): string {
+    return MISSION_COLOR[missionStatus] ?? MISSION_COLOR.idle;
 }

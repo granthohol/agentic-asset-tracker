@@ -4,22 +4,24 @@ import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
 
 /**
- * The internal motion message published to Kafka topic {@code drone.commands.v1}
- * and consumed by the Python edge simulator. See docs/COMMANDS.md.
+ * Motion message published to Kafka topic {@code drone.commands.v1} and consumed by
+ * the Python edge simulator. See docs/COMMANDS.md.
  *
- * <p>This is the {@code SET_WAYPOINT} command shape. Field names match the wire
- * contract the Python consumer reads: note {@code mission_type} is snake_case on
- * the wire, mapped here via {@link JsonProperty} so Java stays camelCase.
+ * <p>{@code type} is {@code SET_WAYPOINT} (steer) or {@code CLEAR_WAYPOINT} (resume walk).
+ * For clear commands, {@code targetLat}/{@code targetLng}/{@code mission_type} are omitted.
  *
- * <p>{@code commandId} powers Python-side dedup and is minted server-side by
- * {@link CommandPublisher}; callers never set it.
+ * <p>{@code commandId} is minted server-side by {@link CommandPublisher}.
  */
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public record CommandEvent(
+    String type,
     String droneId,
-    double targetLat,
-    double targetLng,
+    Double targetLat,
+    Double targetLng,
     @JsonProperty("mission_type") String missionType,
     long issuedAt,
     String commandId
-) {}
+) {
+    public static final String TYPE_SET_WAYPOINT = "SET_WAYPOINT";
+    public static final String TYPE_CLEAR_WAYPOINT = "CLEAR_WAYPOINT";
+}

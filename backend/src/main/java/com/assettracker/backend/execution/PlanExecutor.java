@@ -36,8 +36,8 @@ public class PlanExecutor {
 
     private static final Logger log = LoggerFactory.getLogger(PlanExecutor.class);
 
-    /** Match frontend / edge arrival slack (~0.006°). */
-    static final double ARRIVAL_DEG = 0.006;
+    /** Match frontend / edge STEER_STEP_DEG arrival slack (~0.002°). */
+    static final double ARRIVAL_DEG = 0.002;
     static final long FORM_UP_TIMEOUT_MS = 90_000L;
     static final long FORM_UP_POLL_MS = 300L;
 
@@ -135,8 +135,10 @@ public class PlanExecutor {
                     formUps.add(new FormUpTarget(a.droneId(), a.targetLat(), a.targetLng()));
                 }
             }
-            case PlanAction.ClearWaypoint a ->
+            case PlanAction.ClearWaypoint a -> {
                 graphWriter.clearDroneWaypoint(a.droneId());
+                commandPublisher.publishClearWaypoint(a.droneId());
+            }
         }
     }
 

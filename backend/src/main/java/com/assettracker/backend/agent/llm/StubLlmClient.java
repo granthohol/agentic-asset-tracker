@@ -183,7 +183,7 @@ public class StubLlmClient implements LlmClient {
             : "RING";
 
         actions.add(new PlanAction.UpsertObjective(
-            null, "obj-1", "Observe area (stub)", 1, aoiLat, aoiLng, 500.0, null
+            null, "obj-1", "Observe disturbance", 1, aoiLat, aoiLng, 500.0, null
         ));
 
         if (squadronId != null) {

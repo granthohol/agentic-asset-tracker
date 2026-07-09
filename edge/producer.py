@@ -38,7 +38,9 @@ DEFAULT_DRONE_COUNT = 50
 # Roughly matches Phase 1 map center
 CENTER_LAT = 39.0
 CENTER_LON = -77.2
-STEP_DEG = 0.005 # max distance moved per tick (random walk span AND steer step)
+# Degrees per tick (~1 Hz). Steer is slower so form-up / advance is watchable on the map.
+WALK_STEP_DEG = 0.002
+STEER_STEP_DEG = 0.0012
 PUBLISH_FREQ = 1.0
 JITTER_RATIO = 0.2
 
@@ -65,13 +67,13 @@ class SimulatedDrone:
         if self.target_lat is not None and self.target_lng is not None:
             self._steer_toward_target()
         else:
-            self.latitude += random.uniform(-STEP_DEG, STEP_DEG)
-            self.longitude += random.uniform(-STEP_DEG, STEP_DEG)
+            self.latitude += random.uniform(-WALK_STEP_DEG, WALK_STEP_DEG)
+            self.longitude += random.uniform(-WALK_STEP_DEG, WALK_STEP_DEG)
         # gentle battery random walk, biased downward
         self.battery_level = max(0, min(100, self.battery_level + random.randint(-2, 1)))
 
     def _steer_toward_target(self) -> None:
-        """Move up to STEP_DEG toward (target_lat, target_lng).
+        """Move up to STEER_STEP_DEG toward (target_lat, target_lng).
 
         On arrival: FORM_UP / HOLD keep the target so the drone loiters (no random walk).
         Other mission types clear the waypoint and resume free movement.
@@ -79,7 +81,7 @@ class SimulatedDrone:
         dlat = self.target_lat - self.latitude
         dlng = self.target_lng - self.longitude
         dist = math.hypot(dlat, dlng)
-        if dist <= STEP_DEG:
+        if dist <= STEER_STEP_DEG:
             # Close enough: snap to the target.
             self.latitude = self.target_lat
             self.longitude = self.target_lng
@@ -91,8 +93,8 @@ class SimulatedDrone:
             self.target_lng = None
             self.mission_type = None
         else:
-            self.latitude += STEP_DEG * (dlat / dist)
-            self.longitude += STEP_DEG * (dlng / dist)
+            self.latitude += STEER_STEP_DEG * (dlat / dist)
+            self.longitude += STEER_STEP_DEG * (dlng / dist)
 
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description="Publish mock drone telemetry to Kafka and consume waypoint commands.")
@@ -197,18 +199,30 @@ def _apply_command(
             seen_command_ids.add(command_id)
 
     drone_id = cmd.get("droneId")
-    target_lat = cmd.get("targetLat")
-    target_lng = cmd.get("targetLng")
-    mission_type = cmd.get("mission_type")
-
-    if drone_id is None or target_lat is None or target_lng is None:
-        print(f"Ignoring malformed command (need droneId/targetLat/targetLng): {cmd}")
+    if drone_id is None:
+        print(f"Ignoring malformed command (need droneId): {cmd}")
         return
+
+    cmd_type = (cmd.get("type") or "SET_WAYPOINT").upper()
 
     with lock:
         drone = drones_by_id.get(drone_id)
         if drone is None:
             print(f"Command for unknown drone {drone_id!r}; ignoring")
+            return
+
+        if cmd_type == "CLEAR_WAYPOINT":
+            drone.target_lat = None
+            drone.target_lng = None
+            drone.mission_type = None
+            print(f"CLEAR_WAYPOINT {drone_id} commandId={command_id}")
+            return
+
+        target_lat = cmd.get("targetLat")
+        target_lng = cmd.get("targetLng")
+        mission_type = cmd.get("mission_type")
+        if target_lat is None or target_lng is None:
+            print(f"Ignoring malformed SET_WAYPOINT (need targetLat/targetLng): {cmd}")
             return
         drone.target_lat = float(target_lat)
         drone.target_lng = float(target_lng)

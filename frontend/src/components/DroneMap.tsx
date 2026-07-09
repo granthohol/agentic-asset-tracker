@@ -4,8 +4,9 @@ import { useState, useEffect } from 'react';
 import type { Drone } from '../types/drone'
 import type { ExecutionPlan } from '../types/plan'
 import type { AcceptedRoute } from '../types/route'
+import type { MissionObjective } from '../types/missionObjective'
 import PlanOverlayLayer from './PlanOverlayLayer'
-import { droneIcon } from './droneIcons'
+import { droneIcon, type MissionVisualStatus } from './droneIcons'
 
 type TelemetryMessage =
 | { type: 'snapshot'; drones: Drone[] }
@@ -13,8 +14,8 @@ type TelemetryMessage =
 
 const WEBSOCKET_URL = "ws://localhost:8080/ws/drones";
 
-/** Matches edge/producer.py STEP_DEG arrival snap (with a little slack for telemetry lag). */
-const ARRIVAL_DEG = 0.006;
+/** Matches edge/producer.py STEER_STEP_DEG arrival snap (with slack for telemetry lag). */
+const ARRIVAL_DEG = 0.002;
 
 function distanceDegrees(
     a: { latitude: number; longitude: number },
@@ -43,10 +44,34 @@ function MapResizeFix() {
 interface DroneMapProps {
     pendingPlan: ExecutionPlan | null;
     acceptedRoutes: AcceptedRoute[];
+    activeObjectives: MissionObjective[];
     onRoutesCompleted: (completedIds: string[]) => void;
 }
 
-export default function DroneMap({ pendingPlan, acceptedRoutes, onRoutesCompleted }: DroneMapProps) {
+function missionVisualStatus(
+    droneId: string,
+    pendingPlan: ExecutionPlan | null,
+    acceptedRoutes: AcceptedRoute[],
+): MissionVisualStatus {
+    if (acceptedRoutes.some((r) => r.droneId === droneId)) {
+        return "executing";
+    }
+    if (
+        pendingPlan?.actions.some(
+            (a) => a.op === "setWaypoint" && a.droneId === droneId,
+        )
+    ) {
+        return "proposed";
+    }
+    return "idle";
+}
+
+export default function DroneMap({
+    pendingPlan,
+    acceptedRoutes,
+    activeObjectives,
+    onRoutesCompleted,
+}: DroneMapProps) {
     const [, setConnectionStatus] = useState<'Connecting' | 'Open' | 'Closed' | 'Error'>('Connecting');
     const [drones, setDrones] = useState<Map<string, Drone>>(new Map());
 
@@ -188,28 +213,36 @@ export default function DroneMap({ pendingPlan, acceptedRoutes, onRoutesComplete
             />
             {Array.from(drones.values())
                 .sort((a, b) => a.id.localeCompare(b.id))
-                .map((drone) => (
+                .map((drone) => {
+                const mission = missionVisualStatus(drone.id, pendingPlan, acceptedRoutes);
+                return (
                 <Marker
-                    // Remount when status changes so Leaflet picks up the new DivIcon.
-                    key={`${drone.id}-${drone.status}`}
+                    // Remount when mission color changes so Leaflet picks up the new DivIcon.
+                    key={`${drone.id}-${mission}`}
                     position={[drone.latitude, drone.longitude]}
-                    icon={droneIcon(drone.status)}
+                    icon={droneIcon(mission)}
                 >
                     <Popup className="drone-popup">
                         <div className="drone-popup__body">
                             <strong>{drone.id}</strong>
                             <span>Battery {drone.batteryLevel}%</span>
-                            <span className={`drone-popup__status drone-popup__status--${drone.status.toLowerCase()}`}>
-                                {drone.status}
+                            <span className={`drone-popup__status drone-popup__status--${mission}`}>
+                                {mission === "idle"
+                                    ? "Idle"
+                                    : mission === "proposed"
+                                      ? "Proposed"
+                                      : "Executing"}
                             </span>
                         </div>
                     </Popup>
                 </Marker>
-            ))}
+                );
+            })}
 
             <PlanOverlayLayer
                 pendingPlan={pendingPlan}
                 acceptedRoutes={acceptedRoutes}
+                activeObjectives={activeObjectives}
                 drones={drones}
             />
 

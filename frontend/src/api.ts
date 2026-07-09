@@ -37,3 +37,22 @@ export async function executePlan(plan: ExecutionPlan): Promise<ExecuteResult> {
     }
     return JSON.parse(text) as ExecuteResult;
 }
+
+export interface CancelResult {
+    status: string;
+    cleared: number;
+}
+
+/** HITL Stop: clear waypoints for the given drones (graph + edge CLEAR_WAYPOINT). */
+export async function cancelMission(droneIds: string[]): Promise<CancelResult> {
+    const res = await fetch(`${API_BASE}/api/cancel-mission`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ droneIds }),
+    });
+    const text = await res.text();
+    if (!res.ok) {
+        throw new Error(`/api/cancel-mission failed (${res.status}): ${text}`);
+    }
+    return JSON.parse(text) as CancelResult;
+}

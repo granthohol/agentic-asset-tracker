@@ -4,10 +4,12 @@ import { Circle, CircleMarker, Polyline, Tooltip } from "react-leaflet";
 import type { Drone } from "../types/drone";
 import type { ExecutionPlan } from "../types/plan";
 import type { AcceptedRoute } from "../types/route";
+import type { MissionObjective } from "../types/missionObjective";
 
 interface PlanOverlayLayerProps {
     pendingPlan: ExecutionPlan | null;
     acceptedRoutes: AcceptedRoute[];
+    activeObjectives: MissionObjective[];
     drones: Map<string, Drone>;
 }
 
@@ -25,10 +27,12 @@ function isFormUpMission(missionType?: string): boolean {
  * Map overlays for HITL plans.
  * - Pending: orange FORM_UP wedge + blue AOI (hide ADVANCE until after approve/form-up).
  * - Accepted: green dashed lines whose start always tracks the live drone.
+ * - Active objectives: AOI stays after approve until the mission routes finish.
  */
 export default function PlanOverlayLayer({
     pendingPlan,
     acceptedRoutes,
+    activeObjectives,
     drones,
 }: PlanOverlayLayerProps) {
     // Two-phase plans include FORM_UP + ADVANCE; proposal mode only shows the form-up
@@ -45,12 +49,49 @@ export default function PlanOverlayLayer({
             return true;
         }) ?? [];
 
-    const swarmMode = pendingWaypoints.length >= 2;
+    const swarmMode =
+        pendingWaypoints.length >= 2 || acceptedRoutes.length >= 2;
     const pendingLineWeight = swarmMode ? 1.5 : 2;
     const objectiveRadiusBoost = swarmMode ? 1.15 : 1;
 
+    // Prefer active (approved) objectives; fall back to pending proposal AOI.
+    const objectives: MissionObjective[] =
+        activeObjectives.length > 0
+            ? activeObjectives
+            : (pendingPlan?.actions.flatMap((action, i) => {
+                  if (action.op !== "upsertObjective") return [];
+                  if (action.centerLatitude == null || action.centerLongitude == null) {
+                      return [];
+                  }
+                  return [{
+                      id: `${pendingPlan.planId}-obj-${i}`,
+                      name: action.name,
+                      centerLatitude: action.centerLatitude,
+                      centerLongitude: action.centerLongitude,
+                      radiusMeters: action.radiusMeters ?? 300,
+                  }];
+              }) ?? []);
+
     return (
         <>
+            {objectives.map((obj) => (
+                <Circle
+                    key={obj.id}
+                    center={[obj.centerLatitude, obj.centerLongitude]}
+                    radius={obj.radiusMeters * objectiveRadiusBoost}
+                    pathOptions={{
+                        color: OBJECTIVE_COLOR,
+                        weight: 2,
+                        dashArray: DASH,
+                        fillOpacity: 0.08,
+                    }}
+                >
+                    <Tooltip permanent direction="top">
+                        ◎ {obj.name}
+                    </Tooltip>
+                </Circle>
+            ))}
+
             {acceptedRoutes.map((route) => {
                 const target: [number, number] = [route.targetLat, route.targetLng];
                 const drone = drones.get(route.droneId);
@@ -114,32 +155,6 @@ export default function PlanOverlayLayer({
                                 </Tooltip>
                             </CircleMarker>
                         </Fragment>
-                    );
-                }
-
-                if (
-                    action.op === "upsertObjective" &&
-                    action.centerLatitude != null &&
-                    action.centerLongitude != null
-                ) {
-                    const center: [number, number] = [action.centerLatitude, action.centerLongitude];
-                    const baseRadius = action.radiusMeters ?? 300;
-                    return (
-                        <Circle
-                            key={`pending-obj-${pendingPlan.planId}-${i}`}
-                            center={center}
-                            radius={baseRadius * objectiveRadiusBoost}
-                            pathOptions={{
-                                color: OBJECTIVE_COLOR,
-                                weight: 2,
-                                dashArray: DASH,
-                                fillOpacity: 0.08,
-                            }}
-                        >
-                            <Tooltip permanent direction="top">
-                                ◎ {action.name}
-                            </Tooltip>
-                        </Circle>
                     );
                 }
 

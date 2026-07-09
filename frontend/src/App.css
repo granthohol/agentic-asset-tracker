@@ -100,16 +100,16 @@
   line-height: 1.35;
 }
 
-.drone-popup__status--active {
-  color: #3ad17a;
-}
-
-.drone-popup__status--low_battery {
-  color: #ffb020;
-}
-
-.drone-popup__status--offline {
+.drone-popup__status--idle {
   color: #9ca3af;
+}
+
+.drone-popup__status--proposed {
+  color: #ff8a1f;
+}
+
+.drone-popup__status--executing {
+  color: #3ad17a;
 }
 
 .drone-map .leaflet-control-zoom a {
@@ -215,73 +215,92 @@
   color: #8a93a3;
 }
 
-.command-panel__plan-header {
+.command-panel__puck {
+  padding: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 12px;
+  background: linear-gradient(180deg, #111111 0%, #0a0a0a 100%);
+}
+
+.command-panel__puck-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.command-panel__puck-summary {
+  margin: 0;
+  flex: 1;
+  font-size: 15px;
+  font-weight: 650;
+  line-height: 1.3;
+  letter-spacing: -0.01em;
+  color: #f3f6fb;
+}
+
+.command-panel__puck-details {
+  margin: 14px 0 0;
+  padding: 12px 0 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  margin-bottom: 10px;
+  gap: 8px;
 }
 
-.command-panel__plan-title {
-  font-size: 15px;
-  font-weight: 700;
+.command-panel__puck-row {
+  display: grid;
+  grid-template-columns: 72px 1fr;
+  gap: 10px;
+  align-items: baseline;
 }
 
-.command-panel__plan-id {
+.command-panel__puck-row dt {
+  margin: 0;
   font-size: 11px;
-  color: #8a93a3;
-  font-family: ui-monospace, Consolas, monospace;
-  word-break: break-all;
-}
-
-.command-panel__rationale {
-  margin: 0 0 14px;
-  font-size: 13px;
-  line-height: 1.45;
-  color: #b9c2d0;
-}
-
-.command-panel__swarm-chip {
-  display: inline-block;
-  margin: 0 0 12px;
-  padding: 4px 10px;
-  font-size: 12px;
   font-weight: 600;
-  letter-spacing: 0.02em;
-  color: #ff7a18;
-  background: rgba(255, 122, 24, 0.12);
-  border: 1px solid rgba(255, 122, 24, 0.35);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #6b7380;
+}
+
+.command-panel__puck-row dd {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.35;
+  color: #c5cdd8;
+  font-variant-numeric: tabular-nums;
+}
+
+.command-panel__badge {
+  flex-shrink: 0;
+  padding: 4px 9px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
   border-radius: 999px;
 }
 
-.command-panel__actions {
-  margin: 0 0 16px;
-  padding-left: 18px;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
+.command-panel__badge--proposed {
+  color: #ff8a1f;
+  background: rgba(255, 138, 31, 0.12);
+  border: 1px solid rgba(255, 138, 31, 0.32);
 }
 
-.command-panel__action {
-  font-size: 13px;
-  line-height: 1.4;
-}
-
-.command-panel__op {
-  display: inline-block;
-  margin-right: 6px;
-  padding: 1px 6px;
-  font-size: 11px;
-  font-family: ui-monospace, Consolas, monospace;
-  color: #ff7a18;
-  background: rgba(255, 122, 24, 0.12);
-  border-radius: 5px;
+.command-panel__badge--running {
+  color: #3ad17a;
+  background: rgba(58, 209, 122, 0.12);
+  border: 1px solid rgba(58, 209, 122, 0.32);
 }
 
 .command-panel__buttons {
   display: flex;
   gap: 10px;
   justify-content: flex-end;
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
 }
 
 .btn {
@@ -306,6 +325,11 @@
 .btn--approve {
   color: #0a1a0d;
   background: #3ad17a;
+}
+
+.btn--stop {
+  color: #fff;
+  background: #e04848;
 }
 
 .command-panel__toast {

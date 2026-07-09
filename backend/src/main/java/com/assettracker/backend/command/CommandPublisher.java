@@ -11,13 +11,11 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 /**
- * Publishes {@code SET_WAYPOINT} commands to Kafka topic {@code drone.commands.v1}.
+ * Publishes motion commands to Kafka topic {@code drone.commands.v1}.
  *
  * <p><b>CQRS write seam (motion half).</b> This is the ONLY component that turns a
- * waypoint intent into a Kafka command. There is deliberately <b>no</b>
- * {@code /api/commands} HTTP endpoint: the browser never publishes directly. The
- * only legitimate caller is {@code PlanExecutor} (the Kafka {@code plan.events}
- * listener), which runs commands on behalf of a human-approved {@code ExecutionPlan}.
+ * waypoint intent into a Kafka command. Callers are {@code PlanExecutor} and
+ * {@code MissionCancelService} (HITL Stop) — never the browser directly.
  *
  * <p>{@code commandId} is minted here (server-side UUID) so the Python edge
  * consumer can dedup redelivered commands.
@@ -45,6 +43,7 @@ public class CommandPublisher {
      */
     public CommandEvent publishSetWaypoint(String droneId, double targetLat, double targetLng, String missionType) {
         CommandEvent event = new CommandEvent(
+            CommandEvent.TYPE_SET_WAYPOINT,
             droneId,
             targetLat,
             targetLng,
@@ -52,10 +51,25 @@ public class CommandPublisher {
             System.currentTimeMillis(),
             "cmd-" + UUID.randomUUID()
         );
-        // Key = droneId so all commands for one drone land in the same partition, in order.
         kafkaTemplate.send(TOPIC, event.droneId(), serialize(event));
         log.info("Published SET_WAYPOINT droneId={} target=({},{}) mission={} commandId={}",
             droneId, targetLat, targetLng, missionType, event.commandId());
+        return event;
+    }
+
+    /** Clear the drone's active waypoint so the edge resumes free movement. */
+    public CommandEvent publishClearWaypoint(String droneId) {
+        CommandEvent event = new CommandEvent(
+            CommandEvent.TYPE_CLEAR_WAYPOINT,
+            droneId,
+            null,
+            null,
+            null,
+            System.currentTimeMillis(),
+            "cmd-" + UUID.randomUUID()
+        );
+        kafkaTemplate.send(TOPIC, event.droneId(), serialize(event));
+        log.info("Published CLEAR_WAYPOINT droneId={} commandId={}", droneId, event.commandId());
         return event;
     }
 
