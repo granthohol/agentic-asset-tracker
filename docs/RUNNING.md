@@ -1,20 +1,28 @@
 # Running and Testing the Agentic Asset Tracker
 
-This guide covers the **completed Phase 2 pipeline**:
+This guide covers the streaming pipeline, including the **Phase 4** high-throughput path:
 
 ```
-Python edge producer
-  -> Kafka topic (drone.telemetry.v1)
-    -> Spring Boot consumer
-       -> SQLite shadow log (./backend/data/telemetry-events.db)
-       -> In-memory DroneService map
-         -> WebSocket /ws/drones (snapshot + droneUpdate frames)
-            -> React + Leaflet UI (live markers, no polling)
+Python edge producer (fire-and-forget, up to 1000 drones @ 20 Hz)
+  -> Kafka topic (drone.telemetry.v1, JSON)
+    -> Spring Boot consumer (non-blocking hot path)
+       -> In-memory DroneService map (authoritative for live UI)
+       -> markDirty -> fixed-tick batch broadcaster
+       -> TelemetryPersistence queue -> batched SQLite + Neo4j flush
+         -> WebSocket /ws/drones (BINARY protobuf: SNAPSHOT + BATCH frames)
+            -> React + Leaflet UI (Zustand store + rAF imperative marker layer)
 ```
 
 The React UI consumes WebSocket frames only. `GET /api/drones` remains as a **debug-only** REST endpoint that reads the same `DroneService` map; it is not on the UI hot path.
 
-The wire format for telemetry events is documented in [docs/TELEMETRY.md](TELEMETRY.md).
+The Kafka telemetry wire format (JSON) and the browser WebSocket format (binary protobuf) are both documented in [docs/TELEMETRY.md](TELEMETRY.md).
+
+### Phase 4 high-throughput notes
+
+- **Edge:** `producer.py` sends fire-and-forget (no per-message ack wait, no per-wave flush); it batches with `linger_ms`/`batch_size` and flushes only on shutdown. Scale test: `python3 producer.py --drones 1000 --interval 0.05`.
+- **Backend:** the Kafka listener never blocks on I/O. A `@Scheduled` tick (`telemetry.broadcast.tick-ms`, default 50 ms) sends one coalesced binary `BATCH` frame to all clients; SQLite + Neo4j writes happen on a separate batched flush (`telemetry.persistence.flush-ms`, default 500 ms). `@EnableScheduling` is on `BackendApplication` with a 2-thread scheduler pool.
+- **Protobuf:** schema at [`proto/telemetry.proto`](../proto/telemetry.proto). Backend codegen via the Gradle `com.google.protobuf` plugin (runs on build). Frontend codegen via `npm run proto:gen` (protobufjs), wired into `npm run build`; regenerate after editing the `.proto`.
+- **Frontend render loop:** telemetry lives in a Zustand `droneStore`; `DroneMarkerLayer` moves Leaflet markers imperatively inside `requestAnimationFrame` (create-once, `setLatLng` per tick, `setIcon` only on mission-color change), so 1,000 markers never hit React reconciliation.
 
 ---
 
@@ -137,7 +145,7 @@ python3 producer.py --interval 0.25
 python3 producer.py --bootstrap localhost:9092 --topic drone.telemetry.v1
 ```
 
-The producer prints per-wave ack stats. Cumulative `ack_err` should stay at `0` against a healthy local broker.
+As of Phase 4 the producer sends fire-and-forget (no per-message ack wait). Delivery errors surface via an async errback that prints `Kafka error for <droneId>: ...`; against a healthy local broker you should see none.
 
 ### Command consumer (Phase 3)
 
@@ -151,14 +159,17 @@ and watch the targeted marker steer toward the waypoint.
 
 ## 4. Start the Frontend
 
-The frontend opens a WebSocket to `ws://localhost:8080/ws/drones`, receives an initial snapshot, then merges per-drone updates as Kafka events arrive. It also reconnects with exponential backoff if the connection drops.
+The frontend opens a WebSocket to `ws://localhost:8080/ws/drones`, receives an initial binary `SNAPSHOT` frame, then merges coalesced `BATCH` frames as Kafka events arrive. It also reconnects with exponential backoff if the connection drops.
 
 From `frontend/`:
 
 ```bash
-npm install   # first time only
+npm install       # first time only
+npm run proto:gen # generate src/proto/telemetry.* from proto/telemetry.proto (first time / after schema edits)
 npm run dev
 ```
+
+`npm run build` runs `proto:gen` automatically; `npm run dev` does not, so generate once before your first dev run (the generated files are also committed).
 
 Open `http://localhost:5173` (or whatever Vite prints) in a browser.
 
@@ -176,10 +187,23 @@ You should see `KafkaListener` activity and consumer group join logs. No excepti
 
 - Open the map page; Leaflet tiles load.
 - Open DevTools → **Network** → filter **WS** → click `drones` → **Messages**:
-  - First frame: `{"type":"snapshot","drones":[...]}`
-  - Subsequent frames: `{"type":"droneUpdate","drone":{...}}` continuously while the producer runs.
+  - Frames are **binary** (protobuf), shown as `Binary Message` rows rather than JSON text.
+  - First frame is a `SNAPSHOT` (full fleet); subsequent frames are coalesced `BATCH` frames arriving at the broadcast tick rate (~20/s) while the producer runs.
 - Markers move on the map without page refresh and without any `fetch` polling.
 - Console should log `WebSocket Connection Established`.
+
+### B2. Phase 4 scale test (JSON baseline vs binary)
+
+To reproduce the motivating benchmark, run the edge at full load:
+
+```bash
+python3 producer.py --drones 1000 --interval 0.05
+```
+
+Then in DevTools → **Performance**, record ~5s and compare main-thread time / FPS. The
+pre-Phase-4 build (per-drone JSON frames + React marker rebuild) lags heavily at this load;
+the Phase 4 build (batched binary frames + rAF imperative markers) should hold a smooth
+frame rate. In **Network → WS**, confirm the smaller binary frame size vs the old JSON text.
 
 ### C. SQLite shadow log
 

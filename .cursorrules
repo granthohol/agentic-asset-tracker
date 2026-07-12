@@ -6,9 +6,9 @@ We are building a scalable Command and Control (C2) dashboard for distributed ha
 - Frontend: React, Vite, TypeScript, Leaflet.
 - Backend: Java 21, Spring Boot.
 - Phase 1 (Complete): REST API polling 50 mock drones.
-- Phase 2 (Current): Migrating to event-driven streaming (Kafka, WebSockets) and Python edge mock data.
-- Phase 3 (Future): Relational Ontology, C2 Write-Path, MCP Server for LLM Agentic Planning.
-- Phase 4 (Future): High-throughput optimization (Protocol Buffers, React.memo, requestAnimationFrame).
+- Phase 2 (Complete): Event-driven streaming (Kafka, WebSockets) and Python edge mock data.
+- Phase 3 (Complete): Relational Ontology, C2 Write-Path, agentic LLM planning, map entities (tracks/waypoints/zones).
+- Phase 4 (Complete): High-throughput optimization — 1000-drone scale, binary Protocol Buffers WS payload, batched persistence, and a Zustand + requestAnimationFrame client render loop with React.memo overlays.
 
 # More Detailed Project Writeup: Agentic Asset Tracker
 The Core Strategy: "The Agentic Asset Tracker"

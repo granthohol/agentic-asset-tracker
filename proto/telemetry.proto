@@ -1,0 +1,39 @@
+syntax = "proto3";
+
+// Phase 4 binary WebSocket payload (server -> client) for /ws/drones.
+// Single source of truth: the backend Gradle protobuf plugin and the frontend
+// ts-proto codegen both read this file. Kafka edge->backend stays JSON.
+
+package assettracker.telemetry;
+
+option java_package = "com.assettracker.backend.telemetry.proto";
+option java_outer_classname = "TelemetryProto";
+option java_multiple_files = true;
+
+// Mirrors com.assettracker.backend.model.DroneStatus. proto3 requires a zero default.
+enum DroneStatus {
+  DRONE_STATUS_UNSPECIFIED = 0;
+  ACTIVE = 1;
+  LOW_BATTERY = 2;
+  OFFLINE = 3;
+}
+
+// SNAPSHOT: full fleet on connect. BATCH: coalesced updates for one broadcast tick.
+enum FrameType {
+  FRAME_TYPE_UNSPECIFIED = 0;
+  SNAPSHOT = 1;
+  BATCH = 2;
+}
+
+message DroneState {
+  string id = 1;
+  double lat = 2;
+  double lng = 3;
+  int32 battery = 4;
+  DroneStatus status = 5;
+}
+
+message TelemetryFrame {
+  FrameType type = 1;
+  repeated DroneState drones = 2;
+}

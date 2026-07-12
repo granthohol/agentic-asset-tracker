@@ -11,6 +11,7 @@ import java.sql.DriverManager;
 import java.sql.PreparedStatement;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.util.List;
 
 @Component
 public class TelemetryEventLog {
@@ -79,6 +80,52 @@ public class TelemetryEventLog {
             throw new IllegalStateException("Failed to append telemetry event", e);
         }
 
+    }
+
+    /**
+     * Phase 4: append a whole batch of events in one connection + one transaction using
+     * JDBC batching. Opening a fresh connection and auto-committing per event (as
+     * {@link #append}) collapses under 1000-drone load; the persistence buffer drains its
+     * queue here every flush tick instead.
+     */
+    public void appendBatch(List<TelemetryEvent> events) {
+        if (events.isEmpty()) {
+            return;
+        }
+        String sql = """
+                INSERT INTO telemetry_events (
+                    drone_id,
+                    latitude,
+                    longitude,
+                    battery_level,
+                    status,
+                    event_time_ms,
+                    seq_num,
+                    received_at_ms
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """;
+
+        long receivedAt = System.currentTimeMillis();
+        try (Connection connection = openConnection()) {
+            connection.setAutoCommit(false);
+            try (PreparedStatement statement = connection.prepareStatement(sql)) {
+                for (TelemetryEvent event : events) {
+                    statement.setString(1, event.droneId());
+                    statement.setDouble(2, event.latitude());
+                    statement.setDouble(3, event.longitude());
+                    statement.setInt(4, event.batteryLevel());
+                    statement.setString(5, event.status());
+                    statement.setLong(6, event.time());
+                    statement.setInt(7, event.seqNum());
+                    statement.setLong(8, receivedAt);
+                    statement.addBatch();
+                }
+                statement.executeBatch();
+            }
+            connection.commit();
+        } catch (SQLException e) {
+            throw new IllegalStateException("Failed to append telemetry event batch", e);
+        }
     }
 
     private Connection openConnection() throws SQLException {

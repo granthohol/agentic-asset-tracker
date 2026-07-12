@@ -1,7 +1,6 @@
-import { MapContainer, TileLayer, Marker, useMap } from 'react-leaflet';
-import { useState, useEffect } from 'react';
+import { MapContainer, TileLayer, useMap } from 'react-leaflet';
+import { useState, useEffect, memo } from 'react';
 
-import type { Drone } from '../types/drone'
 import type { ExecutionPlan } from '../types/plan'
 import type { AcceptedRoute } from '../types/route'
 import type { MissionObjective } from '../types/missionObjective'
@@ -11,13 +10,19 @@ import EntityPlacement from './EntityPlacement'
 import EntityCreateForm from './EntityCreateForm'
 import EntityInspector from './EntityInspector'
 import DroneInspector from './DroneInspector'
-import { droneIcon, type MissionVisualStatus } from './droneIcons'
-
-type TelemetryMessage =
-| { type: 'snapshot'; drones: Drone[] }
-| { type: 'droneUpdate'; drone: Drone };
+import DroneMarkerLayer from './DroneMarkerLayer'
+import { decodeTelemetryFrame } from '../telemetry/decodeTelemetryFrame'
+import { useDroneStore } from '../store/droneStore'
+import { missionVisualStatus, droneMissionInfo } from '../utils/missionStatus'
 
 const WEBSOCKET_URL = "ws://localhost:8080/ws/drones";
+
+// These overlays take no props and read their own stores. Memoizing them stops the 20 Hz
+// telemetry batch re-renders of DroneMap from cascading into them.
+const EntityLayerMemo = memo(EntityLayer);
+const EntityPlacementMemo = memo(EntityPlacement);
+const EntityCreateFormMemo = memo(EntityCreateForm);
+const EntityInspectorMemo = memo(EntityInspector);
 
 /** Matches edge/producer.py STEER_STEP_DEG arrival snap (with slack for telemetry lag). */
 const ARRIVAL_DEG = 0.002;
@@ -53,54 +58,6 @@ interface DroneMapProps {
     onRoutesCompleted: (completedIds: string[]) => void;
 }
 
-function missionVisualStatus(
-    droneId: string,
-    pendingPlan: ExecutionPlan | null,
-    acceptedRoutes: AcceptedRoute[],
-): MissionVisualStatus {
-    if (acceptedRoutes.some((r) => r.droneId === droneId)) {
-        return "executing";
-    }
-    if (
-        pendingPlan?.actions.some(
-            (a) => a.op === "setWaypoint" && a.droneId === droneId,
-        )
-    ) {
-        return "proposed";
-    }
-    return "idle";
-}
-
-interface DroneMissionInfo {
-    missionType?: string;
-    waypoint?: { lat: number; lng: number };
-}
-
-/** The active (accepted) or proposed waypoint + mission type for one drone, if any. */
-function droneMissionInfo(
-    droneId: string,
-    pendingPlan: ExecutionPlan | null,
-    acceptedRoutes: AcceptedRoute[],
-): DroneMissionInfo {
-    const route = acceptedRoutes.find((r) => r.droneId === droneId);
-    if (route) {
-        return {
-            missionType: route.missionType,
-            waypoint: { lat: route.targetLat, lng: route.targetLng },
-        };
-    }
-    const proposed = pendingPlan?.actions.find(
-        (a) => a.op === "setWaypoint" && a.droneId === droneId,
-    );
-    if (proposed && proposed.op === "setWaypoint") {
-        return {
-            missionType: proposed.mission_type,
-            waypoint: { lat: proposed.targetLat, lng: proposed.targetLng },
-        };
-    }
-    return {};
-}
-
 export default function DroneMap({
     pendingPlan,
     acceptedRoutes,
@@ -108,7 +65,10 @@ export default function DroneMap({
     onRoutesCompleted,
 }: DroneMapProps) {
     const [, setConnectionStatus] = useState<'Connecting' | 'Open' | 'Closed' | 'Error'>('Connecting');
-    const [drones, setDrones] = useState<Map<string, Drone>>(new Map());
+    // Live fleet lives in the Zustand store; the imperative marker layer reads it via
+    // getState() in rAF. Lightweight consumers here (arrival detection, overlays,
+    // inspector) subscribe for their occasional updates.
+    const drones = useDroneStore((s) => s.drones);
     const [selectedId, setSelectedId] = useState<string | null>(null);
 
     // Clear overlays on arrival. FORM_UP/HOLD loiter — treat "all form-up drones arrived"
@@ -173,6 +133,8 @@ export default function DroneMap({
             if (cancelled) return;
 
             ws = new WebSocket(WEBSOCKET_URL);
+            // Phase 4: frames are binary protobuf (proto/telemetry.proto), not JSON text.
+            ws.binaryType = 'arraybuffer';
 
             ws.onopen = () => {
                 console.log('WebSocket Connection Established');
@@ -181,25 +143,16 @@ export default function DroneMap({
             };
 
             ws.onmessage = (event: MessageEvent) => {
-                // event is a raw string frame. Parse into JSON
-                const message = JSON.parse(event.data) as TelemetryMessage;
-
-                // Application level multiplexer
-                switch (message.type) {
-                    case 'snapshot':
-                        const nextMap = new Map(message.drones.map((drone) => [drone.id, drone]));
-                        setDrones(nextMap);
-                        break;
-                    case 'droneUpdate':
-                        setDrones(prevMap => {
-                            const nextMap = new Map(prevMap);
-                            nextMap.set(message.drone.id, message.drone);
-                            return nextMap;
-                        });
-                        break;
-                    default:
-                        console.log("Unhandled type in WebSocket TelemetryMessage");
-
+                if (!(event.data instanceof ArrayBuffer)) {
+                    console.warn('Expected binary telemetry frame, got', typeof event.data);
+                    return;
+                }
+                const frame = decodeTelemetryFrame(event.data);
+                const store = useDroneStore.getState();
+                if (frame.kind === 'snapshot') {
+                    store.applySnapshot(frame.drones);
+                } else {
+                    store.applyBatch(frame.drones);
                 }
             };
 
@@ -252,20 +205,11 @@ export default function DroneMap({
                 subdomains="abcd"
                 maxZoom={20}
             />
-            {Array.from(drones.values())
-                .sort((a, b) => a.id.localeCompare(b.id))
-                .map((drone) => {
-                const mission = missionVisualStatus(drone.id, pendingPlan, acceptedRoutes);
-                return (
-                <Marker
-                    // Remount when mission color changes so Leaflet picks up the new DivIcon.
-                    key={`${drone.id}-${mission}`}
-                    position={[drone.latitude, drone.longitude]}
-                    icon={droneIcon(mission)}
-                    eventHandlers={{ click: () => setSelectedId(drone.id) }}
-                />
-                );
-            })}
+            <DroneMarkerLayer
+                pendingPlan={pendingPlan}
+                acceptedRoutes={acceptedRoutes}
+                onSelect={setSelectedId}
+            />
 
             <PlanOverlayLayer
                 pendingPlan={pendingPlan}
@@ -274,10 +218,10 @@ export default function DroneMap({
                 drones={drones}
             />
 
-            <EntityLayer />
-            <EntityPlacement />
-            <EntityCreateForm />
-            <EntityInspector />
+            <EntityLayerMemo />
+            <EntityPlacementMemo />
+            <EntityCreateFormMemo />
+            <EntityInspectorMemo />
 
             {selectedDrone && (
                 <DroneInspector

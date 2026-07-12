@@ -1,5 +1,5 @@
 import { Fragment } from "react";
-import type { LeafletMouseEvent } from "leaflet";
+import type { DragEndEvent } from "leaflet";
 import { Circle, CircleMarker, Marker, Polygon, Tooltip } from "react-leaflet";
 
 import { updateTrack, updateWaypoint, updateZone } from "../api";
@@ -85,7 +85,7 @@ export default function EntityLayer() {
                                     icon={zoneHandleIcon()}
                                     draggable
                                     eventHandlers={{
-                                        dragend: (e: LeafletMouseEvent) => {
+                                        dragend: (e: DragEndEvent) => {
                                             const { lat, lng } = e.target.getLatLng();
                                             void updateZone(zone.id, {
                                                 name: zone.name,
@@ -132,7 +132,7 @@ export default function EntityLayer() {
                         draggable={interactive}
                         eventHandlers={{
                             click: () => interactive && select({ kind: "track", id: track.id }),
-                            dragend: (e: LeafletMouseEvent) => {
+                            dragend: (e: DragEndEvent) => {
                                 const { lat, lng } = e.target.getLatLng();
                                 void updateTrack(track.id, {
                                     name: track.name,
@@ -166,7 +166,7 @@ export default function EntityLayer() {
                         draggable={interactive}
                         eventHandlers={{
                             click: () => interactive && select({ kind: "waypoint", id: waypoint.id }),
-                            dragend: (e: LeafletMouseEvent) => {
+                            dragend: (e: DragEndEvent) => {
                                 const { lat, lng } = e.target.getLatLng();
                                 void updateWaypoint(waypoint.id, {
                                     name: waypoint.name,

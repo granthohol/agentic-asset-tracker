@@ -1,5 +1,11 @@
 package com.assettracker.backend.graph;
 
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+
 import org.neo4j.driver.Driver;
 import org.neo4j.driver.Result;
 import org.neo4j.driver.Session;
@@ -17,8 +23,38 @@ public class GraphWriter {
 
     public void upsertDrone(DroneNode drone) {
         try (Session session = driver.session()) {
-            session.run("MERGE (d:Drone {id: $id}) SET d.latitude = $latitude, d.longitude = $longitude, d.batteryLevel = $batteryLevel, d.status = $status", 
+            session.run("MERGE (d:Drone {id: $id}) SET d.latitude = $latitude, d.longitude = $longitude, d.batteryLevel = $batteryLevel, d.status = $status",
                 Values.parameters("id", drone.id(), "latitude", drone.latitude(), "longitude", drone.longitude(), "batteryLevel", drone.batteryLevel(), "status", drone.status().toString()));
+        }
+    }
+
+    /**
+     * Phase 4: batch-upsert many drone projections in one round trip via UNWIND. The
+     * telemetry persistence buffer coalesces to newest-per-drone before calling this, so a
+     * whole tick's worth of position updates becomes a single Cypher statement instead of
+     * one session/transaction per event.
+     */
+    public void upsertDronesBatch(Collection<DroneNode> drones) {
+        if (drones.isEmpty()) {
+            return;
+        }
+        List<Map<String, Object>> rows = new ArrayList<>(drones.size());
+        for (DroneNode d : drones) {
+            Map<String, Object> row = new HashMap<>();
+            row.put("id", d.id());
+            row.put("latitude", d.latitude());
+            row.put("longitude", d.longitude());
+            row.put("batteryLevel", d.batteryLevel());
+            row.put("status", d.status().toString());
+            rows.add(row);
+        }
+        try (Session session = driver.session()) {
+            session.run(
+                "UNWIND $rows AS row "
+                    + "MERGE (d:Drone {id: row.id}) "
+                    + "SET d.latitude = row.latitude, d.longitude = row.longitude, "
+                    + "d.batteryLevel = row.batteryLevel, d.status = row.status",
+                Values.parameters("rows", rows));
         }
     }
 
