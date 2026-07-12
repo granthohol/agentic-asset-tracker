@@ -36,5 +36,6 @@ echo 'drone-007:{"droneId":"drone-007","targetLat":39.06,"targetLng":-77.10,"mis
 ```
 
 The simulator prints `SET_WAYPOINT drone-007 -> (39.06, -77.1) ...` and that marker
-will visibly steer to the target over the next several telemetry ticks, then resume
-random walk once it arrives. Re-sending the same `commandId` is ignored (dedup).
+will visibly steer to the target over the next several telemetry ticks, then hold
+station there until a new `SET_WAYPOINT` or a `CLEAR_WAYPOINT` arrives. Re-sending the
+same `commandId` is ignored (dedup).

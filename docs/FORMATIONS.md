@@ -26,7 +26,7 @@ For prompts like “observe the disturbance at lat,lng with a swarm in a wedge�
 4. `preview_formation` at the AOI (same type + drone order) → emit `setWaypoint` with `mission_type: "ADVANCE"`.
 5. On approve, `PlanExecutor` publishes all FORM_UP commands, **waits** until telemetry shows the swarm has formed (or ~90s timeout), then publishes ADVANCE.
 
-Edge behavior: `FORM_UP` / `HOLD` **loiter** on arrival; `ADVANCE` clears the waypoint (see [COMMANDS.md](COMMANDS.md)).
+Edge behavior: every mission type **loiters** on arrival (holds station at its waypoint until a new `SET_WAYPOINT` or an explicit `CLEAR_WAYPOINT`); see [COMMANDS.md](COMMANDS.md).
 
 ## Tools
 

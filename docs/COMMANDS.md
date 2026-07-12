@@ -38,8 +38,12 @@ Every command includes:
 
 | Value | On arrival |
 |-------|------------|
-| `FORM_UP` / `HOLD` | Snap to target and **loiter** (keep waypoint; no random walk). Used for formation assembly. |
-| `ADVANCE` / `RECON` / other | Snap to target and **clear** waypoint (resume free movement). |
+| `FORM_UP` / `HOLD` / `ADVANCE` / `RECON` / any | Snap to target and **loiter** (keep waypoint; hold station, no random walk). |
+
+A tasked drone holds station at its waypoint until it receives a new `SET_WAYPOINT`
+or an explicit `CLEAR_WAYPOINT`. This keeps "arrived" a stable, detectable condition
+(so the FORM_UP gate and ADVANCE mission-complete never miss a one-tick arrival) and
+stops early arrivers from scattering off the objective mid-mission.
 
 ### Example `SET_WAYPOINT`
 

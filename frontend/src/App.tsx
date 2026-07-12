@@ -183,16 +183,25 @@ function App() {
     });
   }, []);
 
-  // Drop AOI + puck when the mission has no more live routes.
+  // Mission finished: drop AOI + puck, and release the drones so they resume free
+  // flight instead of sitting frozen on station where the maneuver ended.
   useEffect(() => {
     if (
       acceptedRoutes.length === 0
       && !pendingPlan
       && missionCard?.status === 'running'
     ) {
+      const finishedPlan = approvedPlanRef.current;
       approvedPlanRef.current = null;
       setActiveObjectives([]);
       setMissionCard(null);
+      if (finishedPlan) {
+        const droneIds = droneIdsFromPlan(finishedPlan);
+        if (droneIds.length > 0) {
+          // Best-effort CLEAR_WAYPOINT; a transient failure just leaves them holding.
+          void cancelMission(droneIds).catch(() => {});
+        }
+      }
     }
   }, [acceptedRoutes.length, pendingPlan, missionCard?.status]);
 

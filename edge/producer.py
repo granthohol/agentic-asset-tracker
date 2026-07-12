@@ -40,7 +40,7 @@ CENTER_LAT = 39.0
 CENTER_LON = -77.2
 # Degrees per tick (~1 Hz). Steer is slower so form-up / advance is watchable on the map.
 WALK_STEP_DEG = 0.002
-STEER_STEP_DEG = 0.0012
+STEER_STEP_DEG = 0.0025
 PUBLISH_FREQ = 1.0
 JITTER_RATIO = 0.2
 
@@ -75,23 +75,23 @@ class SimulatedDrone:
     def _steer_toward_target(self) -> None:
         """Move up to STEER_STEP_DEG toward (target_lat, target_lng).
 
-        On arrival: FORM_UP / HOLD keep the target so the drone loiters (no random walk).
-        Other mission types clear the waypoint and resume free movement.
+        On arrival the drone holds station at the target (loiter) for every mission
+        type. A waypoint is only released by an explicit CLEAR_WAYPOINT (mission
+        cancel), so "arrived" is a stable, detectable condition for both the FORM_UP
+        gate and ADVANCE mission-complete. Previously non-FORM_UP missions cleared the
+        waypoint the instant they touched down and resumed a random walk, which made
+        early arrivers scatter off the objective and turned arrival into a one-tick
+        event the map/executor routinely missed (mission stuck "running").
         """
         dlat = self.target_lat - self.latitude
         dlng = self.target_lng - self.longitude
         dist = math.hypot(dlat, dlng)
         if dist <= STEER_STEP_DEG:
-            # Close enough: snap to the target.
+            # Close enough: snap to the target and hold station. step_physics keeps
+            # calling steer while target_* is set, so the drone stays put until a new
+            # SET_WAYPOINT or a CLEAR_WAYPOINT arrives.
             self.latitude = self.target_lat
             self.longitude = self.target_lng
-            mission = (self.mission_type or "").upper()
-            if mission in ("FORM_UP", "HOLD"):
-                # Keep target_* set so step_physics keeps calling steer (loiter).
-                return
-            self.target_lat = None
-            self.target_lng = None
-            self.mission_type = None
         else:
             self.latitude += STEER_STEP_DEG * (dlat / dist)
             self.longitude += STEER_STEP_DEG * (dlng / dist)
