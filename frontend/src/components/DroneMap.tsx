@@ -1,4 +1,4 @@
-import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet';
+import { MapContainer, TileLayer, Marker, useMap } from 'react-leaflet';
 import { useState, useEffect } from 'react';
 
 import type { Drone } from '../types/drone'
@@ -6,6 +6,7 @@ import type { ExecutionPlan } from '../types/plan'
 import type { AcceptedRoute } from '../types/route'
 import type { MissionObjective } from '../types/missionObjective'
 import PlanOverlayLayer from './PlanOverlayLayer'
+import DroneInspector from './DroneInspector'
 import { droneIcon, type MissionVisualStatus } from './droneIcons'
 
 type TelemetryMessage =
@@ -66,6 +67,36 @@ function missionVisualStatus(
     return "idle";
 }
 
+interface DroneMissionInfo {
+    missionType?: string;
+    waypoint?: { lat: number; lng: number };
+}
+
+/** The active (accepted) or proposed waypoint + mission type for one drone, if any. */
+function droneMissionInfo(
+    droneId: string,
+    pendingPlan: ExecutionPlan | null,
+    acceptedRoutes: AcceptedRoute[],
+): DroneMissionInfo {
+    const route = acceptedRoutes.find((r) => r.droneId === droneId);
+    if (route) {
+        return {
+            missionType: route.missionType,
+            waypoint: { lat: route.targetLat, lng: route.targetLng },
+        };
+    }
+    const proposed = pendingPlan?.actions.find(
+        (a) => a.op === "setWaypoint" && a.droneId === droneId,
+    );
+    if (proposed && proposed.op === "setWaypoint") {
+        return {
+            missionType: proposed.mission_type,
+            waypoint: { lat: proposed.targetLat, lng: proposed.targetLng },
+        };
+    }
+    return {};
+}
+
 export default function DroneMap({
     pendingPlan,
     acceptedRoutes,
@@ -74,6 +105,7 @@ export default function DroneMap({
 }: DroneMapProps) {
     const [, setConnectionStatus] = useState<'Connecting' | 'Open' | 'Closed' | 'Error'>('Connecting');
     const [drones, setDrones] = useState<Map<string, Drone>>(new Map());
+    const [selectedId, setSelectedId] = useState<string | null>(null);
 
     // Clear overlays on arrival. FORM_UP/HOLD loiter — treat "all form-up drones arrived"
     // as phase-complete so App can swap in ADVANCE routes. ADVANCE clears per-route.
@@ -197,6 +229,11 @@ export default function DroneMap({
 
     }, []); // [] -> runs once on mount, never again
 
+    const selectedDrone = selectedId ? drones.get(selectedId) : undefined;
+    const selectedInfo = selectedDrone
+        ? droneMissionInfo(selectedDrone.id, pendingPlan, acceptedRoutes)
+        : {};
+
     return (
         <MapContainer
             className="drone-map"
@@ -221,21 +258,8 @@ export default function DroneMap({
                     key={`${drone.id}-${mission}`}
                     position={[drone.latitude, drone.longitude]}
                     icon={droneIcon(mission)}
-                >
-                    <Popup className="drone-popup">
-                        <div className="drone-popup__body">
-                            <strong>{drone.id}</strong>
-                            <span>Battery {drone.batteryLevel}%</span>
-                            <span className={`drone-popup__status drone-popup__status--${mission}`}>
-                                {mission === "idle"
-                                    ? "Idle"
-                                    : mission === "proposed"
-                                      ? "Proposed"
-                                      : "Executing"}
-                            </span>
-                        </div>
-                    </Popup>
-                </Marker>
+                    eventHandlers={{ click: () => setSelectedId(drone.id) }}
+                />
                 );
             })}
 
@@ -245,6 +269,16 @@ export default function DroneMap({
                 activeObjectives={activeObjectives}
                 drones={drones}
             />
+
+            {selectedDrone && (
+                <DroneInspector
+                    drone={selectedDrone}
+                    role={missionVisualStatus(selectedDrone.id, pendingPlan, acceptedRoutes)}
+                    missionType={selectedInfo.missionType}
+                    waypoint={selectedInfo.waypoint}
+                    onClose={() => setSelectedId(null)}
+                />
+            )}
 
         </MapContainer>
     );

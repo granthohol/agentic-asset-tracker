@@ -122,4 +122,76 @@ public class GraphWriter {
                 Values.parameters("d", droneId));
         }
     }
+
+    // ---- Map entities (Phase 1): standalone :Track / :Waypoint / :Zone nodes ----
+
+    public void upsertTrack(TrackNode track) {
+        try (Session session = driver.session()) {
+            session.run(
+                "MERGE (t:Track {id: $id}) "
+                    + "SET t.name = $name, t.affiliation = $affiliation, t.domain = $domain, "
+                    + "t.latitude = $latitude, t.longitude = $longitude",
+                Values.parameters(
+                    "id", track.id(),
+                    "name", track.name(),
+                    "affiliation", track.affiliation().toString(),
+                    "domain", track.domain().toString(),
+                    "latitude", track.latitude(),
+                    "longitude", track.longitude()));
+        }
+    }
+
+    public void upsertWaypoint(WaypointNode waypoint) {
+        try (Session session = driver.session()) {
+            session.run(
+                "MERGE (w:Waypoint {id: $id}) "
+                    + "SET w.name = $name, w.latitude = $latitude, w.longitude = $longitude",
+                Values.parameters(
+                    "id", waypoint.id(),
+                    "name", waypoint.name(),
+                    "latitude", waypoint.latitude(),
+                    "longitude", waypoint.longitude()));
+        }
+    }
+
+    public void upsertZone(ZoneNode zone) {
+        try (Session session = driver.session()) {
+            // Polygon vertices are stored as two parallel primitive arrays because Neo4j
+            // node properties cannot be nested maps/lists-of-lists.
+            session.run(
+                "MERGE (z:Zone {id: $id}) "
+                    + "SET z.name = $name, z.type = $type, z.shape = $shape, "
+                    + "z.centerLatitude = $centerLatitude, z.centerLongitude = $centerLongitude, "
+                    + "z.radiusMeters = $radiusMeters, "
+                    + "z.vertexLats = $vertexLats, z.vertexLngs = $vertexLngs",
+                Values.parameters(
+                    "id", zone.id(),
+                    "name", zone.name(),
+                    "type", zone.type().toString(),
+                    "shape", zone.shape().toString(),
+                    "centerLatitude", zone.centerLatitude(),
+                    "centerLongitude", zone.centerLongitude(),
+                    "radiusMeters", zone.radiusMeters(),
+                    "vertexLats", zone.vertexLats(),
+                    "vertexLngs", zone.vertexLngs()));
+        }
+    }
+
+    public void deleteTrack(String id) {
+        try (Session session = driver.session()) {
+            session.run("MATCH (t:Track {id:$id}) DETACH DELETE t", Values.parameters("id", id));
+        }
+    }
+
+    public void deleteWaypoint(String id) {
+        try (Session session = driver.session()) {
+            session.run("MATCH (w:Waypoint {id:$id}) DETACH DELETE w", Values.parameters("id", id));
+        }
+    }
+
+    public void deleteZone(String id) {
+        try (Session session = driver.session()) {
+            session.run("MATCH (z:Zone {id:$id}) DETACH DELETE z", Values.parameters("id", id));
+        }
+    }
 }
