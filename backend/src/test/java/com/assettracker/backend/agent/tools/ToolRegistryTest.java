@@ -16,6 +16,9 @@ import com.assettracker.backend.agent.formation.FormationService;
 import com.assettracker.backend.graph.DroneNode;
 import com.assettracker.backend.graph.GraphService;
 import com.assettracker.backend.graph.SquadronNode;
+import com.assettracker.backend.graph.ZoneNode;
+import com.assettracker.backend.graph.ZoneShape;
+import com.assettracker.backend.graph.ZoneType;
 import com.assettracker.backend.model.DroneStatus;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -38,8 +41,11 @@ class ToolRegistryTest {
             "list_squadrons", "list_objectives", "list_drones", "get_drone_by_id",
             "get_drones_in_squadron", "get_drones_by_status", "get_low_battery_drones",
             "get_low_battery_drones_in_sector", "get_squadrons_for_objective", "get_drones_near",
-            "list_formations", "preview_formation"
+            "list_formations", "preview_formation",
+            "list_tracks", "list_waypoints", "list_zones",
+            "get_track_by_id", "get_waypoint_by_id", "get_zone_by_id"
         );
+        assertThat(names).hasSize(18);
 
         for (JsonNode spec : specs) {
             assertThat(spec.hasNonNull("name")).isTrue();
@@ -141,6 +147,32 @@ class ToolRegistryTest {
 
         assertThat(result.get("found").asBoolean()).isFalse();
         assertThat(result.get("droneId").asText()).isEqualTo("nope");
+    }
+
+    @Test
+    void invokeListZonesReturnsJsonArray() {
+        when(graph.listZones()).thenReturn(List.of(
+            new ZoneNode("zone-1", "No-Fly", ZoneType.RESTRICTED, ZoneShape.CIRCLE,
+                39.05, -77.18, 800.0, new double[0], new double[0])
+        ));
+
+        JsonNode result = registry.invoke("list_zones", null);
+
+        assertThat(result.isArray()).isTrue();
+        assertThat(result.get(0).get("id").asText()).isEqualTo("zone-1");
+        assertThat(result.get(0).get("type").asText()).isEqualTo("RESTRICTED");
+    }
+
+    @Test
+    void getZoneByIdNotFoundReturnsFoundFalse() {
+        when(graph.getZoneById("nope")).thenReturn(Optional.empty());
+
+        ObjectNode args = mapper.createObjectNode();
+        args.put("id", "nope");
+        JsonNode result = registry.invoke("get_zone_by_id", args);
+
+        assertThat(result.get("found").asBoolean()).isFalse();
+        assertThat(result.get("id").asText()).isEqualTo("nope");
     }
 
     @Test

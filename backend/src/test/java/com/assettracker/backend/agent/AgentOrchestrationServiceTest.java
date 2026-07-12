@@ -142,6 +142,29 @@ class AgentOrchestrationServiceTest {
     }
 
     @Test
+    void creationPromptYieldsUpsertTrackAndNoWaypoints() {
+        when(graph.listSquadrons()).thenReturn(List.of());
+        when(graph.listDrones()).thenReturn(List.of());
+        when(graph.listTracks()).thenReturn(List.of());
+        when(graph.listWaypoints()).thenReturn(List.of());
+        when(graph.listZones()).thenReturn(List.of());
+
+        ExecutionPlan plan = orchestrator.planFromPrompt(
+            "Mark a hostile aerial track at 39.05,-77.18");
+
+        assertThat(plan.actions()).hasSize(1);
+        assertThat(plan.actions().get(0)).isInstanceOf(PlanAction.UpsertTrack.class);
+        PlanAction.UpsertTrack track = (PlanAction.UpsertTrack) plan.actions().get(0);
+        assertThat(track.affiliation())
+            .isEqualTo(com.assettracker.backend.graph.Affiliation.HOSTILE);
+        assertThat(track.domain())
+            .isEqualTo(com.assettracker.backend.graph.TrackDomain.AERIAL);
+        assertThat(track.latitude()).isEqualTo(39.05);
+        assertThat(track.longitude()).isEqualTo(-77.18);
+        assertThat(plan.actions()).noneMatch(a -> a instanceof PlanAction.SetWaypoint);
+    }
+
+    @Test
     void mintsSquadronWhenGraphIsEmpty() {
         when(graph.listSquadrons()).thenReturn(List.of());
         when(graph.listDrones()).thenReturn(List.of());

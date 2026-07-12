@@ -174,6 +174,60 @@ public class ToolRegistry {
                 optDouble(args, "facingLongitude")
             ))
         ));
+
+        // --- persistent map entities (tracks / waypoints / zones) -----------
+        register(new Tool(
+            "list_tracks",
+            "List every persistent map track (id, name, affiliation, domain, latitude, longitude). "
+                + "Tracks are static contacts (FRIENDLY/HOSTILE/UNKNOWN, AERIAL/GROUND), not drones. "
+                + "Call before referencing or removing a track by id.",
+            objectSchema(props()),
+            args -> mapper.valueToTree(graph.listTracks())
+        ));
+
+        register(new Tool(
+            "list_waypoints",
+            "List every persistent map waypoint (id, name, latitude, longitude). These are durable, "
+                + "labeled points of interest, distinct from a drone's ephemeral motion target.",
+            objectSchema(props()),
+            args -> mapper.valueToTree(graph.listWaypoints())
+        ));
+
+        register(new Tool(
+            "list_zones",
+            "List every map zone (id, name, type RESTRICTED/PATROL, shape CIRCLE/POLYGON, and its "
+                + "geometry). Use to find a named area (e.g. a no-fly or patrol zone) and its center "
+                + "before routing drones toward or around it.",
+            objectSchema(props()),
+            args -> mapper.valueToTree(graph.listZones())
+        ));
+
+        register(new Tool(
+            "get_track_by_id",
+            "Get one map track by id. Returns {\"found\": false} when the id is unknown.",
+            objectSchema(props("id", field("string", "The track id, e.g. 'track-1a2b3c4d'.")), "id"),
+            args -> graph.getTrackById(requireString(args, "id"))
+                .map(t -> (JsonNode) mapper.valueToTree(t))
+                .orElseGet(() -> notFound("id", optString(args, "id")))
+        ));
+
+        register(new Tool(
+            "get_waypoint_by_id",
+            "Get one map waypoint by id. Returns {\"found\": false} when the id is unknown.",
+            objectSchema(props("id", field("string", "The waypoint id.")), "id"),
+            args -> graph.getWaypointById(requireString(args, "id"))
+                .map(w -> (JsonNode) mapper.valueToTree(w))
+                .orElseGet(() -> notFound("id", optString(args, "id")))
+        ));
+
+        register(new Tool(
+            "get_zone_by_id",
+            "Get one map zone by id. Returns {\"found\": false} when the id is unknown.",
+            objectSchema(props("id", field("string", "The zone id.")), "id"),
+            args -> graph.getZoneById(requireString(args, "id"))
+                .map(z -> (JsonNode) mapper.valueToTree(z))
+                .orElseGet(() -> notFound("id", optString(args, "id")))
+        ));
     }
 
     // --- public seam ---------------------------------------------------------

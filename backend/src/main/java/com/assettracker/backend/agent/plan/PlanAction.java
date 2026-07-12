@@ -1,5 +1,11 @@
 package com.assettracker.backend.agent.plan;
 
+import java.util.List;
+
+import com.assettracker.backend.graph.Affiliation;
+import com.assettracker.backend.graph.TrackDomain;
+import com.assettracker.backend.graph.ZoneShape;
+import com.assettracker.backend.graph.ZoneType;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.annotation.JsonSubTypes;
@@ -30,6 +36,12 @@ import com.fasterxml.jackson.annotation.JsonTypeInfo;
     @JsonSubTypes.Type(value = PlanAction.RemoveSquadronFromObjective.class, name = "removeSquadronFromObjective"),
     @JsonSubTypes.Type(value = PlanAction.SetWaypoint.class, name = "setWaypoint"),
     @JsonSubTypes.Type(value = PlanAction.ClearWaypoint.class, name = "clearWaypoint"),
+    @JsonSubTypes.Type(value = PlanAction.UpsertTrack.class, name = "upsertTrack"),
+    @JsonSubTypes.Type(value = PlanAction.UpsertWaypoint.class, name = "upsertWaypoint"),
+    @JsonSubTypes.Type(value = PlanAction.UpsertZone.class, name = "upsertZone"),
+    @JsonSubTypes.Type(value = PlanAction.RemoveTrack.class, name = "removeTrack"),
+    @JsonSubTypes.Type(value = PlanAction.RemoveWaypoint.class, name = "removeWaypoint"),
+    @JsonSubTypes.Type(value = PlanAction.RemoveZone.class, name = "removeZone"),
 })
 public sealed interface PlanAction {
 
@@ -102,5 +114,67 @@ public sealed interface PlanAction {
     /** Clear a drone's current waypoint (it resumes free movement). */
     record ClearWaypoint(
         String droneId
+    ) implements PlanAction {}
+
+    /**
+     * Create or update a persistent map track (a tracked contact). {@code id} xor
+     * {@code tempId} as with the other upserts. This is a map annotation, not a drone.
+     */
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    record UpsertTrack(
+        String id,
+        String tempId,
+        String name,
+        Affiliation affiliation,
+        TrackDomain domain,
+        Double latitude,
+        Double longitude
+    ) implements PlanAction {}
+
+    /**
+     * Create or update a persistent, labeled map waypoint (point of interest).
+     * <b>Distinct from {@link SetWaypoint}</b>, which is ephemeral drone motion tasking;
+     * this is a durable {@code :Waypoint} marker on the map.
+     */
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    record UpsertWaypoint(
+        String id,
+        String tempId,
+        String name,
+        Double latitude,
+        Double longitude
+    ) implements PlanAction {}
+
+    /**
+     * Create or update a map zone. CIRCLE => {@code centerLatitude}/{@code centerLongitude}
+     * + {@code radiusMeters}. POLYGON => {@code vertices} as [[lat,lng],...] with >= 3 points.
+     * {@code id} xor {@code tempId} as above.
+     */
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    record UpsertZone(
+        String id,
+        String tempId,
+        String name,
+        ZoneType type,
+        ZoneShape shape,
+        Double centerLatitude,
+        Double centerLongitude,
+        Double radiusMeters,
+        List<List<Double>> vertices
+    ) implements PlanAction {}
+
+    /** Delete a persistent map track by its real id. */
+    record RemoveTrack(
+        String id
+    ) implements PlanAction {}
+
+    /** Delete a persistent map waypoint by its real id. */
+    record RemoveWaypoint(
+        String id
+    ) implements PlanAction {}
+
+    /** Delete a map zone by its real id. */
+    record RemoveZone(
+        String id
     ) implements PlanAction {}
 }

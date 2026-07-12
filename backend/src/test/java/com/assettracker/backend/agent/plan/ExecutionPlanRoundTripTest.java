@@ -63,6 +63,50 @@ class ExecutionPlanRoundTripTest {
         assertThat(reserialized).doesNotContain("targetEntityId");
     }
 
+    private static final String ENTITY_PLAN_JSON = """
+        {
+          "planId": "plan-002",
+          "rationale": "Mark a hostile track and a no-fly zone, then aim an objective at the track.",
+          "actions": [
+            { "op": "upsertTrack", "tempId": "trk-1", "name": "Bogey", "affiliation": "HOSTILE",
+              "domain": "AERIAL", "latitude": 39.05, "longitude": -77.18 },
+            { "op": "upsertZone", "tempId": "zone-1", "name": "No-Fly", "type": "RESTRICTED",
+              "shape": "POLYGON", "vertices": [[39.0,-77.2],[39.1,-77.2],[39.1,-77.1]] },
+            { "op": "upsertObjective", "tempId": "obj-1", "name": "Shadow bogey", "priority": 1,
+              "targetEntityId": "$trk-1" },
+            { "op": "removeZone", "id": "zone-legacy" }
+          ]
+        }
+        """;
+
+    @Test
+    void parsesAndRoundTripsEntityOps() throws Exception {
+        ExecutionPlan plan = mapper.readValue(ENTITY_PLAN_JSON, ExecutionPlan.class);
+        assertThat(plan.actions()).hasSize(4);
+
+        assertThat(plan.actions().get(0)).isInstanceOf(PlanAction.UpsertTrack.class);
+        PlanAction.UpsertTrack track = (PlanAction.UpsertTrack) plan.actions().get(0);
+        assertThat(track.affiliation()).isEqualTo(com.assettracker.backend.graph.Affiliation.HOSTILE);
+        assertThat(track.domain()).isEqualTo(com.assettracker.backend.graph.TrackDomain.AERIAL);
+
+        assertThat(plan.actions().get(1)).isInstanceOf(PlanAction.UpsertZone.class);
+        PlanAction.UpsertZone zone = (PlanAction.UpsertZone) plan.actions().get(1);
+        assertThat(zone.shape()).isEqualTo(com.assettracker.backend.graph.ZoneShape.POLYGON);
+        assertThat(zone.vertices()).hasSize(3);
+        assertThat(zone.vertices().get(0)).containsExactly(39.0, -77.2);
+
+        PlanAction.UpsertObjective obj = (PlanAction.UpsertObjective) plan.actions().get(2);
+        assertThat(obj.targetEntityId()).isEqualTo("$trk-1"); // entity $ref preserved
+
+        assertThat(plan.actions().get(3)).isInstanceOf(PlanAction.RemoveZone.class);
+
+        String reserialized = mapper.writeValueAsString(plan);
+        ExecutionPlan second = mapper.readValue(reserialized, ExecutionPlan.class);
+        assertThat(second).isEqualTo(plan);
+        assertThat(reserialized).contains("\"op\":\"upsertTrack\"");
+        assertThat(reserialized).contains("\"op\":\"removeZone\"");
+    }
+
     @Test
     void unknownOpIsRejected() {
         String bad = """

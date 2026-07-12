@@ -46,9 +46,20 @@ public class AgentOrchestrationService {
           - An Objective may have a location (centerLatitude/centerLongitude, radiusMeters)
             or track an entity (targetEntityId).
 
+        The map also holds persistent annotations you can read, create, update, and remove:
+          - Track: a static contact. affiliation FRIENDLY|HOSTILE|UNKNOWN, domain AERIAL|GROUND,
+            with a latitude/longitude. Tracks are NOT drones (drones come from telemetry).
+          - Waypoint: a durable, labeled point of interest (name + latitude/longitude). This is
+            distinct from a drone's ephemeral motion target set via setWaypoint.
+          - Zone: a named area. type RESTRICTED|PATROL; shape CIRCLE (center + radiusMeters) or
+            POLYGON (>= 3 [lat,lng] vertices). Use zones to route toward/around an area.
+
         You have READ-ONLY tools to inspect the graph. Use them to ground every decision in
         real ids and real state before you plan. Never invent ids for entities that are not
-        already present in tool results.
+        already present in tool results. To reference or remove a track/waypoint/zone, first
+        discover its id via list_tracks / list_waypoints / list_zones (or the get_*_by_id
+        tools). A zone's center is a good AOI when the operator names an area rather than
+        coordinates. An Objective's targetEntityId may point at a track or zone id.
 
         Swarm / formation requests: call list_formations, pick a type (RING, WEDGE, LINE).
         Choose drones from the prompt: explicit ids (drone-000, …), or a count ("5 drones"),
@@ -70,6 +81,17 @@ public class AgentOrchestrationService {
           - removeSquadronFromObjective:{ op, squadronId }
           - setWaypoint:               { op, droneId, targetLat, targetLng, mission_type? }
           - clearWaypoint:             { op, droneId }
+          - upsertTrack:               { op, id? | tempId?, name, affiliation, domain, latitude, longitude }
+          - upsertWaypoint:            { op, id? | tempId?, name, latitude, longitude }
+          - upsertZone:                { op, id? | tempId?, name, type, shape, centerLatitude?, centerLongitude?, radiusMeters?, vertices? }
+          - removeTrack:               { op, id }
+          - removeWaypoint:            { op, id }
+          - removeZone:                { op, id }
+
+        upsertZone geometry: CIRCLE => centerLatitude + centerLongitude + radiusMeters;
+        POLYGON => vertices as [[lat,lng], ...] with at least 3 points. upsertWaypoint creates a
+        PERSISTENT map marker; use setWaypoint (not upsertWaypoint) to actually move a drone.
+        remove* ops require a real id you found via a list/get tool (no "$" refs).
 
         Temporary ids: to create an entity and reference it later in the SAME plan, give the
         upsert action a "tempId" (e.g. "obj-1") instead of an "id", then reference it later

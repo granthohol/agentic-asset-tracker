@@ -12,10 +12,15 @@ import org.springframework.stereotype.Component;
 import com.assettracker.backend.agent.plan.ExecutionPlan;
 import com.assettracker.backend.agent.plan.PlanAction;
 import com.assettracker.backend.command.CommandPublisher;
+import com.assettracker.backend.entity.EntityService;
 import com.assettracker.backend.graph.GraphWriter;
 import com.assettracker.backend.graph.ObjectiveNode;
 import com.assettracker.backend.graph.SquadronNode;
+import com.assettracker.backend.graph.TrackNode;
 import com.assettracker.backend.graph.Waypoint;
+import com.assettracker.backend.graph.WaypointNode;
+import com.assettracker.backend.graph.ZoneNode;
+import com.assettracker.backend.graph.ZoneShape;
 import com.assettracker.backend.model.Drone;
 import com.assettracker.backend.service.DroneService;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -44,17 +49,20 @@ public class PlanExecutor {
     private final GraphWriter graphWriter;
     private final CommandPublisher commandPublisher;
     private final DroneService droneService;
+    private final EntityService entityService;
     private final ObjectMapper mapper;
 
     public PlanExecutor(
         GraphWriter graphWriter,
         CommandPublisher commandPublisher,
         DroneService droneService,
+        EntityService entityService,
         ObjectMapper mapper
     ) {
         this.graphWriter = graphWriter;
         this.commandPublisher = commandPublisher;
         this.droneService = droneService;
+        this.entityService = entityService;
         this.mapper = mapper;
     }
 
@@ -139,7 +147,43 @@ public class PlanExecutor {
                 graphWriter.clearDroneWaypoint(a.droneId());
                 commandPublisher.publishClearWaypoint(a.droneId());
             }
+            // Persistent map entities route through EntityService (Neo4j + WS broadcast),
+            // not GraphWriter directly, so agent edits show on the live map like manual ones.
+            case PlanAction.UpsertTrack a -> {
+                String id = resolveUpsertId(a.id(), a.tempId(), "track", ctx);
+                entityService.upsertTrack(new TrackNode(
+                    id, a.name(), a.affiliation(), a.domain(), a.latitude(), a.longitude()));
+            }
+            case PlanAction.UpsertWaypoint a -> {
+                String id = resolveUpsertId(a.id(), a.tempId(), "waypoint", ctx);
+                entityService.upsertWaypoint(new WaypointNode(id, a.name(), a.latitude(), a.longitude()));
+            }
+            case PlanAction.UpsertZone a -> {
+                String id = resolveUpsertId(a.id(), a.tempId(), "zone", ctx);
+                entityService.upsertZone(toZoneNode(id, a));
+            }
+            case PlanAction.RemoveTrack a -> entityService.deleteTrack(a.id());
+            case PlanAction.RemoveWaypoint a -> entityService.deleteWaypoint(a.id());
+            case PlanAction.RemoveZone a -> entityService.deleteZone(a.id());
         }
+    }
+
+    /** Build a ZoneNode from an upsertZone action (circle center+radius, or polygon vertices). */
+    private static ZoneNode toZoneNode(String id, PlanAction.UpsertZone a) {
+        if (a.shape() == ZoneShape.CIRCLE) {
+            return new ZoneNode(
+                id, a.name(), a.type(), a.shape(),
+                a.centerLatitude(), a.centerLongitude(), a.radiusMeters(),
+                new double[0], new double[0]);
+        }
+        List<List<Double>> verts = a.vertices();
+        double[] lats = new double[verts.size()];
+        double[] lngs = new double[verts.size()];
+        for (int i = 0; i < verts.size(); i++) {
+            lats[i] = verts.get(i).get(0);
+            lngs[i] = verts.get(i).get(1);
+        }
+        return new ZoneNode(id, a.name(), a.type(), a.shape(), null, null, null, lats, lngs);
     }
 
     private void waitForFormUp(String planId, List<FormUpTarget> formUps) {

@@ -8,6 +8,7 @@ import org.springframework.stereotype.Component;
 
 import com.assettracker.backend.agent.plan.ExecutionPlan;
 import com.assettracker.backend.agent.plan.PlanAction;
+import com.assettracker.backend.graph.ZoneShape;
 
 /**
  * Pre-publish validation for {@code /api/execute-plan}. Rejects a plan (throws
@@ -74,6 +75,64 @@ public class PlanValidator {
             }
             case PlanAction.ClearWaypoint a ->
                 requireLiteral(a.droneId(), index, "clearWaypoint.droneId");
+            case PlanAction.UpsertTrack a -> {
+                String tempId = requireXorId(a.id(), a.tempId(), index, "upsertTrack");
+                requireText(a.name(), index, "upsertTrack.name");
+                if (a.affiliation() == null || a.domain() == null) {
+                    throw new IllegalArgumentException(
+                        "action " + index + " (upsertTrack): affiliation and domain are required");
+                }
+                requireBothLatLng(a.latitude(), a.longitude(), index, "upsertTrack");
+                declareTemp(tempId, declaredTempIds, index);
+            }
+            case PlanAction.UpsertWaypoint a -> {
+                String tempId = requireXorId(a.id(), a.tempId(), index, "upsertWaypoint");
+                requireText(a.name(), index, "upsertWaypoint.name");
+                requireBothLatLng(a.latitude(), a.longitude(), index, "upsertWaypoint");
+                declareTemp(tempId, declaredTempIds, index);
+            }
+            case PlanAction.UpsertZone a -> {
+                String tempId = requireXorId(a.id(), a.tempId(), index, "upsertZone");
+                requireText(a.name(), index, "upsertZone.name");
+                if (a.type() == null || a.shape() == null) {
+                    throw new IllegalArgumentException(
+                        "action " + index + " (upsertZone): type and shape are required");
+                }
+                validateZoneGeometry(a, index);
+                declareTemp(tempId, declaredTempIds, index);
+            }
+            case PlanAction.RemoveTrack a ->
+                requireLiteral(a.id(), index, "removeTrack.id");
+            case PlanAction.RemoveWaypoint a ->
+                requireLiteral(a.id(), index, "removeWaypoint.id");
+            case PlanAction.RemoveZone a ->
+                requireLiteral(a.id(), index, "removeZone.id");
+        }
+    }
+
+    private void validateZoneGeometry(PlanAction.UpsertZone a, int index) {
+        if (a.shape() == ZoneShape.CIRCLE) {
+            requireBothLatLng(a.centerLatitude(), a.centerLongitude(), index, "upsertZone.center");
+            if (a.radiusMeters() == null || a.radiusMeters() <= 0) {
+                throw new IllegalArgumentException(
+                    "action " + index + " (upsertZone): CIRCLE requires radiusMeters > 0");
+            }
+            return;
+        }
+        // POLYGON
+        List<List<Double>> vertices = a.vertices();
+        if (vertices == null || vertices.size() < 3) {
+            throw new IllegalArgumentException(
+                "action " + index + " (upsertZone): POLYGON requires at least 3 vertices");
+        }
+        for (int v = 0; v < vertices.size(); v++) {
+            List<Double> vertex = vertices.get(v);
+            if (vertex == null || vertex.size() != 2 || vertex.get(0) == null || vertex.get(1) == null) {
+                throw new IllegalArgumentException(
+                    "action " + index + " (upsertZone): vertex " + v + " must be [lat, lng]");
+            }
+            requireCoord(vertex.get(0), -90, 90, index, "upsertZone.vertex[" + v + "].lat");
+            requireCoord(vertex.get(1), -180, 180, index, "upsertZone.vertex[" + v + "].lng");
         }
     }
 
@@ -140,6 +199,16 @@ public class PlanValidator {
         }
         requireCoord(lat, -90, 90, index, op + ".centerLatitude");
         requireCoord(lng, -180, 180, index, op + ".centerLongitude");
+    }
+
+    /** Both coordinates required and in range (map entities always have a position). */
+    private void requireBothLatLng(Double lat, Double lng, int index, String op) {
+        if (lat == null || lng == null) {
+            throw new IllegalArgumentException(
+                "action " + index + " (" + op + "): latitude and longitude are required");
+        }
+        requireCoord(lat, -90, 90, index, op + ".latitude");
+        requireCoord(lng, -180, 180, index, op + ".longitude");
     }
 
     private void requireCoord(double value, double min, double max, int index, String field) {

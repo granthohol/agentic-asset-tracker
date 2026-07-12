@@ -77,6 +77,49 @@
   background: #0a0a0a;
 }
 
+/* ---- Track markers (contacts) ---- */
+.track-marker {
+  background: transparent !important;
+  border: none !important;
+}
+
+.track-marker__wrap {
+  position: relative;
+  display: block;
+  width: 18px;
+  height: 18px;
+}
+
+.track-marker__glyph {
+  position: absolute;
+  inset: 3px;
+  border: 1px solid rgba(255, 255, 255, 0.5);
+}
+
+.track-marker__glyph--aerial {
+  transform: rotate(45deg);
+}
+
+.track-marker__glyph--ground {
+  border-radius: 1px;
+}
+
+/* ---- Waypoint markers (points of interest) ---- */
+.waypoint-marker {
+  background: transparent !important;
+  border: none !important;
+}
+
+.waypoint-marker__dot {
+  display: block;
+  width: 12px;
+  height: 12px;
+  box-sizing: border-box;
+  border-radius: 50%;
+  border: 1px solid rgba(0, 0, 0, 0.5);
+  box-shadow: 0 0 6px rgba(199, 208, 218, 0.5);
+}
+
 /* ---- Drone inspector (click read-out) ---- */
 .drone-inspector {
   position: absolute;
@@ -479,6 +522,16 @@
   filter: brightness(1.06);
 }
 
+.c2-btn--active {
+  color: var(--c2-issue-ink);
+  background: var(--c2-issue);
+  border-color: var(--c2-issue);
+}
+
+.c2-btn--active:hover:not(:disabled) {
+  filter: brightness(1.06);
+}
+
 .command-panel__fault {
   margin: 0;
   padding: 8px 14px;
@@ -488,4 +541,177 @@
   line-height: 1.4;
   color: var(--c2-fault);
   background: rgba(196, 74, 74, 0.08);
+}
+
+/* ---- Entity placement toolbar (map overlay) ---- */
+.entity-toolbar {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  z-index: 1200;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  background: var(--c2-panel-raised);
+  border: 1px solid var(--c2-line);
+  border-radius: 4px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.55);
+}
+
+.entity-toolbar__label {
+  font-size: 10px;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--c2-mute);
+  padding: 0 2px;
+}
+
+/* Crosshair while a placement tool is armed. */
+.leaflet-container.placing {
+  cursor: crosshair;
+}
+
+/* ---- Entity create form (inline popover) & inspector ---- */
+.entity-create-form,
+.entity-inspector {
+  position: absolute;
+  z-index: 1200;
+  width: 232px;
+  background: var(--c2-panel-raised);
+  border: 1px solid var(--c2-line);
+  border-radius: 4px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.55);
+  font-family: var(--font-ui);
+  color: var(--c2-ink);
+  user-select: none;
+}
+
+.entity-inspector--dragging {
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.7);
+}
+
+.entity-panel__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--c2-line);
+}
+
+.entity-inspector .entity-panel__header {
+  cursor: grab;
+  touch-action: none;
+}
+
+.entity-inspector--dragging .entity-panel__header {
+  cursor: grabbing;
+}
+
+.entity-panel__title {
+  font-family: var(--font-data);
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  color: var(--c2-ink);
+  text-transform: uppercase;
+}
+
+.entity-panel__close {
+  border: none;
+  background: none;
+  color: var(--c2-mute);
+  font-size: 16px;
+  line-height: 1;
+  padding: 0 2px;
+  cursor: pointer;
+}
+
+.entity-panel__close:hover {
+  color: var(--c2-ink);
+}
+
+.entity-panel__body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+}
+
+.entity-panel__field {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.entity-panel__label {
+  font-size: 10px;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--c2-mute);
+}
+
+.entity-panel__input,
+.entity-panel__select {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 5px 7px;
+  font-family: var(--font-data);
+  font-size: 12px;
+  color: var(--c2-ink);
+  background: var(--c2-panel);
+  border: 1px solid var(--c2-line);
+  border-radius: 3px;
+}
+
+.entity-panel__input:focus,
+.entity-panel__select:focus {
+  outline: none;
+  border-color: var(--c2-mute);
+}
+
+.entity-panel__row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.entity-panel__value {
+  font-family: var(--font-data);
+  font-size: 12px;
+  color: var(--c2-ink);
+  text-align: right;
+}
+
+.entity-panel__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+  padding-top: 2px;
+}
+
+.entity-panel__error {
+  font-family: var(--font-data);
+  font-size: 11px;
+  line-height: 1.35;
+  color: var(--c2-fault);
+}
+
+/* Draggable handle at a selected circle zone's center. */
+.zone-handle {
+  background: transparent !important;
+  border: none !important;
+}
+
+.zone-handle__dot {
+  display: block;
+  width: 14px;
+  height: 14px;
+  box-sizing: border-box;
+  border-radius: 50%;
+  background: var(--c2-ink);
+  border: 2px solid #0a0a0a;
+  box-shadow: 0 0 6px rgba(230, 235, 240, 0.6);
+  cursor: grab;
 }

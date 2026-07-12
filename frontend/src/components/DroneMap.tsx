@@ -6,6 +6,10 @@ import type { ExecutionPlan } from '../types/plan'
 import type { AcceptedRoute } from '../types/route'
 import type { MissionObjective } from '../types/missionObjective'
 import PlanOverlayLayer from './PlanOverlayLayer'
+import EntityLayer from './EntityLayer'
+import EntityPlacement from './EntityPlacement'
+import EntityCreateForm from './EntityCreateForm'
+import EntityInspector from './EntityInspector'
 import DroneInspector from './DroneInspector'
 import { droneIcon, type MissionVisualStatus } from './droneIcons'
 
@@ -269,6 +273,11 @@ export default function DroneMap({
                 activeObjectives={activeObjectives}
                 drones={drones}
             />
+
+            <EntityLayer />
+            <EntityPlacement />
+            <EntityCreateForm />
+            <EntityInspector />
 
             {selectedDrone && (
                 <DroneInspector

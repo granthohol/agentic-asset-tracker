@@ -38,12 +38,21 @@ Every action is an object with an `op` discriminator. Server-side deserializatio
 | `removeSquadronFromObjective` | `squadronId` | — | `GraphWriter.removeSquadronFromObjective` |
 | `setWaypoint` | `droneId`, `targetLat`, `targetLng` | `mission_type` | `CommandPublisher.publishSetWaypoint` **and** `GraphWriter.setDroneWaypoint` |
 | `clearWaypoint` | `droneId` | — | `GraphWriter.clearDroneWaypoint` |
+| `upsertTrack` | `name`, `affiliation`, `domain`, `latitude`, `longitude`, and (`id` **xor** `tempId`) | — | `EntityService.upsertTrack` |
+| `upsertWaypoint` | `name`, `latitude`, `longitude`, and (`id` **xor** `tempId`) | — | `EntityService.upsertWaypoint` |
+| `upsertZone` | `name`, `type`, `shape`, and (`id` **xor** `tempId`) | CIRCLE: `centerLatitude`, `centerLongitude`, `radiusMeters`; POLYGON: `vertices` (`[[lat,lng],…]`) | `EntityService.upsertZone` |
+| `removeTrack` | `id` | — | `EntityService.deleteTrack` |
+| `removeWaypoint` | `id` | — | `EntityService.deleteWaypoint` |
+| `removeZone` | `id` | — | `EntityService.deleteZone` |
 
 Notes:
 
 - `droneId` is **never** server-minted — drones exist only because telemetry created them. A plan cannot conjure a drone.
 - `setWaypoint` is the one action that crosses both planes: it mirrors the target into Neo4j (so reads reflect intent immediately) **and** publishes a motion command to the edge. See [docs/COMMANDS.md](COMMANDS.md) for the `SET_WAYPOINT` wire shape.
 - `mission_type` is snake_case on the wire (it matches the command contract); the Java record maps it to `missionType`.
+- **Persistent vs. ephemeral waypoints:** `upsertWaypoint` creates a durable `:Waypoint` map marker (an ontology annotation). `setWaypoint` is unrelated — it is ephemeral drone motion tasking. Use `setWaypoint` to move a drone; use `upsertWaypoint` to place a labeled point of interest.
+- The `upsert*`/`remove*` **entity** ops route through `EntityService` (not `GraphWriter` directly), so each write persists to Neo4j **and** broadcasts over `/ws/entities` to the live map exactly like a manual edit. Discovery of existing entity ids is done via the read tools `list_tracks` / `list_waypoints` / `list_zones` (and `get_*_by_id`).
+- `remove*` ops require a literal id (no `$ref`); an Objective's `targetEntityId` may reference a track/zone id (including a `$tempId` created earlier in the same plan).
 
 ---
 

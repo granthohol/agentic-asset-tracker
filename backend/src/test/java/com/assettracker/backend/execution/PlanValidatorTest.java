@@ -9,6 +9,10 @@ import org.junit.jupiter.api.Test;
 
 import com.assettracker.backend.agent.plan.ExecutionPlan;
 import com.assettracker.backend.agent.plan.PlanAction;
+import com.assettracker.backend.graph.Affiliation;
+import com.assettracker.backend.graph.TrackDomain;
+import com.assettracker.backend.graph.ZoneShape;
+import com.assettracker.backend.graph.ZoneType;
 
 class PlanValidatorTest {
 
@@ -85,6 +89,78 @@ class PlanValidatorTest {
     void rejectsDollarRefOnDroneId() {
         assertThatThrownBy(() -> validator.validate(plan(
             new PlanAction.SetWaypoint("$drone-1", 39.0, -77.0, null)
+        )))
+            .isInstanceOf(IllegalArgumentException.class)
+            .hasMessageContaining("literal id");
+    }
+
+    @Test
+    void acceptsValidTrackUpsert() {
+        assertThatCode(() -> validator.validate(plan(
+            new PlanAction.UpsertTrack(
+                null, "track-1", "Bogey", Affiliation.HOSTILE, TrackDomain.AERIAL, 39.05, -77.18)
+        ))).doesNotThrowAnyException();
+    }
+
+    @Test
+    void rejectsTrackMissingAffiliation() {
+        assertThatThrownBy(() -> validator.validate(plan(
+            new PlanAction.UpsertTrack(null, "track-1", "Bogey", null, TrackDomain.AERIAL, 39.05, -77.18)
+        )))
+            .isInstanceOf(IllegalArgumentException.class)
+            .hasMessageContaining("affiliation and domain");
+    }
+
+    @Test
+    void rejectsTrackMissingCoordinates() {
+        assertThatThrownBy(() -> validator.validate(plan(
+            new PlanAction.UpsertTrack(null, "track-1", "Bogey", Affiliation.HOSTILE, TrackDomain.AERIAL, null, null)
+        )))
+            .isInstanceOf(IllegalArgumentException.class)
+            .hasMessageContaining("latitude and longitude");
+    }
+
+    @Test
+    void acceptsValidCircleZone() {
+        assertThatCode(() -> validator.validate(plan(
+            new PlanAction.UpsertZone(null, "zone-1", "No-Fly", ZoneType.RESTRICTED, ZoneShape.CIRCLE,
+                39.05, -77.18, 800.0, null)
+        ))).doesNotThrowAnyException();
+    }
+
+    @Test
+    void rejectsCircleZoneWithoutRadius() {
+        assertThatThrownBy(() -> validator.validate(plan(
+            new PlanAction.UpsertZone(null, "zone-1", "No-Fly", ZoneType.RESTRICTED, ZoneShape.CIRCLE,
+                39.05, -77.18, null, null)
+        )))
+            .isInstanceOf(IllegalArgumentException.class)
+            .hasMessageContaining("radiusMeters");
+    }
+
+    @Test
+    void rejectsPolygonZoneWithTooFewVertices() {
+        assertThatThrownBy(() -> validator.validate(plan(
+            new PlanAction.UpsertZone(null, "zone-1", "Box", ZoneType.PATROL, ZoneShape.POLYGON,
+                null, null, null, List.of(List.of(39.0, -77.2), List.of(39.1, -77.2)))
+        )))
+            .isInstanceOf(IllegalArgumentException.class)
+            .hasMessageContaining("at least 3 vertices");
+    }
+
+    @Test
+    void acceptsValidPolygonZone() {
+        assertThatCode(() -> validator.validate(plan(
+            new PlanAction.UpsertZone(null, "zone-1", "Box", ZoneType.PATROL, ZoneShape.POLYGON,
+                null, null, null, List.of(
+                    List.of(39.0, -77.2), List.of(39.1, -77.2), List.of(39.1, -77.1)))
+        ))).doesNotThrowAnyException();
+    }
+
+    @Test
+    void rejectsRemoveWithDollarRef() {
+        assertThatThrownBy(() -> validator.validate(plan(
+            new PlanAction.RemoveTrack("$track-1")
         )))
             .isInstanceOf(IllegalArgumentException.class)
             .hasMessageContaining("literal id");

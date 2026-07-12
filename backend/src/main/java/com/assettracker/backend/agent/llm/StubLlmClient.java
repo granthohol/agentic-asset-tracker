@@ -14,6 +14,10 @@ import com.assettracker.backend.agent.formation.FormationService;
 import com.assettracker.backend.agent.formation.FormationType;
 import com.assettracker.backend.agent.plan.ExecutionPlan;
 import com.assettracker.backend.agent.plan.PlanAction;
+import com.assettracker.backend.graph.Affiliation;
+import com.assettracker.backend.graph.TrackDomain;
+import com.assettracker.backend.graph.ZoneShape;
+import com.assettracker.backend.graph.ZoneType;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
@@ -47,6 +51,14 @@ public class StubLlmClient implements LlmClient {
             + "|(?:with|using|send)\\s+(\\d+)\\s*drones?"
             + "|\\b(\\d+)\\s*drones?\\b"
     );
+    /** Create/remove verbs for map-entity intents. */
+    private static final Pattern CREATE_VERB = Pattern.compile(
+        "(?i)\\b(mark|add|create|place|drop|tag|put|set\\s+up)\\b");
+    private static final Pattern REMOVE_VERB = Pattern.compile(
+        "(?i)\\b(remove|delete|erase)\\b");
+    /** "radius 800" or "800 m" / "800 meters". */
+    private static final Pattern RADIUS = Pattern.compile(
+        "(?i)radius\\s+(\\d+(?:\\.\\d+)?)|\\b(\\d+(?:\\.\\d+)?)\\s*(?:m|meters?)\\b");
 
     private final ObjectMapper mapper;
 
@@ -61,19 +73,30 @@ public class StubLlmClient implements LlmClient {
 
         if (!hasListDrones) {
             return LlmResponse.toolUse(
-                "Inspecting fleet, squadrons, and available formations.",
+                "Inspecting fleet, squadrons, formations, and map entities.",
                 List.of(
                     new ToolCall("call_squadrons", "list_squadrons", mapper.createObjectNode()),
                     new ToolCall("call_drones", "list_drones", mapper.createObjectNode()),
-                    new ToolCall("call_formations", "list_formations", mapper.createObjectNode())
+                    new ToolCall("call_formations", "list_formations", mapper.createObjectNode()),
+                    new ToolCall("call_tracks", "list_tracks", mapper.createObjectNode()),
+                    new ToolCall("call_waypoints", "list_waypoints", mapper.createObjectNode()),
+                    new ToolCall("call_zones", "list_zones", mapper.createObjectNode())
                 )
             );
         }
 
         String userCommand = firstUserText(request);
+
+        // Map-entity intents (create/remove tracks, waypoints, zones) short-circuit the
+        // swarm path — they need no formation preview.
+        ExecutionPlan entityPlan = tryEntityPlan(userCommand, request);
+        if (entityPlan != null) {
+            return end(entityPlan);
+        }
+
         List<String> available = collectAllDroneIds(request);
         List<String> droneIds = selectDroneIds(userCommand, available);
-        double[] aoi = parseLatLng(userCommand);
+        double[] aoi = resolveAoi(userCommand, request);
         FormationType type = inferFormationType(userCommand);
 
         if (droneIds.isEmpty()) {
@@ -242,6 +265,209 @@ public class StubLlmClient implements LlmClient {
             return FormationType.LINE;
         }
         return FormationType.RING;
+    }
+
+    // --- Map entity heuristics (offline analogue of an LLM's create/reference) ------
+
+    /**
+     * Detect a create/remove intent for a persistent map entity. Returns a ready plan, or
+     * {@code null} when the prompt is not an entity command (so the swarm path is unchanged).
+     */
+    ExecutionPlan tryEntityPlan(String userCommand, LlmRequest request) {
+        if (userCommand == null || userCommand.isBlank()) {
+            return null;
+        }
+        String lower = userCommand.toLowerCase(Locale.ROOT);
+
+        // Removal first: a verb plus an entity whose name is referenced in the prompt.
+        if (REMOVE_VERB.matcher(lower).find()) {
+            PlanAction removal = resolveRemoval(lower, request);
+            if (removal != null) {
+                return entityPlan("Removing the map entity named in the request.", removal);
+            }
+        }
+
+        if (!CREATE_VERB.matcher(lower).find()) {
+            return null;
+        }
+
+        if (containsAny(lower, "zone", "no-fly", "no fly", "nofly", "restricted", "patrol", "keep-out", "keep out")) {
+            double[] c = parseLatLng(userCommand);
+            ZoneType type = lower.contains("patrol") ? ZoneType.PATROL : ZoneType.RESTRICTED;
+            double radius = parseRadiusMeters(userCommand);
+            String name = (type == ZoneType.PATROL ? "Patrol" : "Restricted") + " zone";
+            return entityPlan("Creating a " + type + " CIRCLE zone from the request.",
+                new PlanAction.UpsertZone(null, "zone-1", name, type, ZoneShape.CIRCLE,
+                    c[0], c[1], radius, null));
+        }
+
+        if (containsAny(lower, "waypoint", "way point", "rally", "checkpoint", "poi")) {
+            double[] c = parseLatLng(userCommand);
+            String name = lower.contains("rally") ? "Rally point" : "Waypoint";
+            return entityPlan("Placing a persistent map waypoint.",
+                new PlanAction.UpsertWaypoint(null, "wp-1", name, c[0], c[1]));
+        }
+
+        if (containsAny(lower, "track", "contact", "hostile", "friendly", "unknown", "bogey", "target")) {
+            double[] c = parseLatLng(userCommand);
+            Affiliation aff = lower.contains("friendly") ? Affiliation.FRIENDLY
+                : lower.contains("unknown") ? Affiliation.UNKNOWN
+                : Affiliation.HOSTILE;
+            TrackDomain domain = containsAny(lower, "ground", "vehicle", "tank", "infantry", "convoy")
+                ? TrackDomain.GROUND : TrackDomain.AERIAL;
+            String name = capitalize(aff.name().toLowerCase(Locale.ROOT)) + " "
+                + domain.name().toLowerCase(Locale.ROOT) + " contact";
+            return entityPlan("Marking a " + aff + " " + domain + " track.",
+                new PlanAction.UpsertTrack(null, "track-1", name, aff, domain, c[0], c[1]));
+        }
+
+        return null;
+    }
+
+    private PlanAction resolveRemoval(String lowerPrompt, LlmRequest request) {
+        for (JsonNode arr : allToolContents(request, "list_tracks")) {
+            for (JsonNode n : arr) {
+                if (entityNameReferenced(lowerPrompt, n)) {
+                    return new PlanAction.RemoveTrack(n.path("id").asText());
+                }
+            }
+        }
+        for (JsonNode arr : allToolContents(request, "list_zones")) {
+            for (JsonNode n : arr) {
+                if (entityNameReferenced(lowerPrompt, n)) {
+                    return new PlanAction.RemoveZone(n.path("id").asText());
+                }
+            }
+        }
+        for (JsonNode arr : allToolContents(request, "list_waypoints")) {
+            for (JsonNode n : arr) {
+                if (entityNameReferenced(lowerPrompt, n)) {
+                    return new PlanAction.RemoveWaypoint(n.path("id").asText());
+                }
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Resolve the AOI: explicit {@code lat,lng} wins; otherwise fall back to a named zone
+     * center (then a named waypoint) found in tool results; else the stub default.
+     */
+    private double[] resolveAoi(String userCommand, LlmRequest request) {
+        if (hasExplicitLatLng(userCommand)) {
+            return parseLatLng(userCommand);
+        }
+        String lower = userCommand == null ? "" : userCommand.toLowerCase(Locale.ROOT);
+        double[] zone = zoneCenterByName(lower, request);
+        if (zone != null) {
+            return zone;
+        }
+        double[] wp = waypointByName(lower, request);
+        if (wp != null) {
+            return wp;
+        }
+        return parseLatLng(userCommand);
+    }
+
+    private double[] zoneCenterByName(String lowerPrompt, LlmRequest request) {
+        for (JsonNode arr : allToolContents(request, "list_zones")) {
+            for (JsonNode z : arr) {
+                if (entityNameReferenced(lowerPrompt, z)
+                    && z.hasNonNull("centerLatitude") && z.hasNonNull("centerLongitude")) {
+                    return new double[] {
+                        z.get("centerLatitude").asDouble(), z.get("centerLongitude").asDouble() };
+                }
+            }
+        }
+        return null;
+    }
+
+    private double[] waypointByName(String lowerPrompt, LlmRequest request) {
+        for (JsonNode arr : allToolContents(request, "list_waypoints")) {
+            for (JsonNode w : arr) {
+                if (entityNameReferenced(lowerPrompt, w)
+                    && w.hasNonNull("latitude") && w.hasNonNull("longitude")) {
+                    return new double[] { w.get("latitude").asDouble(), w.get("longitude").asDouble() };
+                }
+            }
+        }
+        return null;
+    }
+
+    private ExecutionPlan entityPlan(String rationale, PlanAction... actions) {
+        return new ExecutionPlan("plan-" + UUID.randomUUID(), rationale, List.of(actions));
+    }
+
+    static boolean entityNameReferenced(String lowerPrompt, JsonNode entity) {
+        JsonNode name = entity.get("name");
+        if (name == null || name.isNull()) {
+            return false;
+        }
+        String n = name.asText().toLowerCase(Locale.ROOT).trim();
+        if (n.isEmpty()) {
+            return false;
+        }
+        if (lowerPrompt.contains(n)) {
+            return true;
+        }
+        for (String token : n.split("[^a-z0-9]+")) {
+            if (token.length() >= 4 && lowerPrompt.contains(token)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    static boolean hasExplicitLatLng(String userCommand) {
+        if (userCommand == null) {
+            return false;
+        }
+        Matcher m = LAT_LNG.matcher(userCommand);
+        if (!m.find()) {
+            return false;
+        }
+        try {
+            double lat = Double.parseDouble(m.group(1));
+            double lng = Double.parseDouble(m.group(2));
+            return lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180;
+        } catch (NumberFormatException e) {
+            return false;
+        }
+    }
+
+    static double parseRadiusMeters(String userCommand) {
+        if (userCommand == null) {
+            return 500.0;
+        }
+        Matcher m = RADIUS.matcher(userCommand);
+        if (m.find()) {
+            String g = m.group(1) != null ? m.group(1) : m.group(2);
+            try {
+                double r = Double.parseDouble(g);
+                if (r > 0) {
+                    return r;
+                }
+            } catch (NumberFormatException ignored) {
+                // fall through to default
+            }
+        }
+        return 500.0;
+    }
+
+    private static boolean containsAny(String haystack, String... needles) {
+        for (String needle : needles) {
+            if (haystack.contains(needle)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static String capitalize(String s) {
+        if (s == null || s.isEmpty()) {
+            return s;
+        }
+        return Character.toUpperCase(s.charAt(0)) + s.substring(1);
     }
 
     private boolean hasToolResult(LlmRequest request, String toolName) {

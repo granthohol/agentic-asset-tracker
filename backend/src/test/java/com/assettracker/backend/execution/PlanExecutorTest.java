@@ -17,9 +17,16 @@ import org.mockito.Mockito;
 import com.assettracker.backend.agent.plan.ExecutionPlan;
 import com.assettracker.backend.agent.plan.PlanAction;
 import com.assettracker.backend.command.CommandPublisher;
+import com.assettracker.backend.entity.EntityService;
+import com.assettracker.backend.graph.Affiliation;
 import com.assettracker.backend.graph.GraphWriter;
 import com.assettracker.backend.graph.ObjectiveNode;
+import com.assettracker.backend.graph.TrackDomain;
+import com.assettracker.backend.graph.TrackNode;
 import com.assettracker.backend.graph.Waypoint;
+import com.assettracker.backend.graph.ZoneNode;
+import com.assettracker.backend.graph.ZoneShape;
+import com.assettracker.backend.graph.ZoneType;
 import com.assettracker.backend.model.Drone;
 import com.assettracker.backend.model.DroneStatus;
 import com.assettracker.backend.service.DroneService;
@@ -30,8 +37,9 @@ class PlanExecutorTest {
     private final GraphWriter graphWriter = Mockito.mock(GraphWriter.class);
     private final CommandPublisher commandPublisher = Mockito.mock(CommandPublisher.class);
     private final DroneService droneService = Mockito.mock(DroneService.class);
+    private final EntityService entityService = Mockito.mock(EntityService.class);
     private final PlanExecutor executor =
-        new PlanExecutor(graphWriter, commandPublisher, droneService, new ObjectMapper());
+        new PlanExecutor(graphWriter, commandPublisher, droneService, entityService, new ObjectMapper());
 
     @Test
     void mintsTempIdAndResolvesItForLaterActions() {
@@ -99,5 +107,75 @@ class PlanExecutorTest {
         verify(commandPublisher, never()).publishSetWaypoint(
             Mockito.anyString(), Mockito.anyDouble(), Mockito.anyDouble(), Mockito.any());
         verify(graphWriter, never()).setDroneWaypoint(Mockito.anyString(), Mockito.any());
+    }
+
+    @Test
+    void upsertTrackRoutesThroughEntityServiceAndMintsTempId() {
+        ExecutionPlan plan = new ExecutionPlan("plan-track", "r", List.of(
+            new PlanAction.UpsertTrack(
+                null, "track-1", "Hostile aerial contact",
+                Affiliation.HOSTILE, TrackDomain.AERIAL, 39.05, -77.18)
+        ));
+
+        executor.execute(plan);
+
+        ArgumentCaptor<TrackNode> captor = ArgumentCaptor.forClass(TrackNode.class);
+        verify(entityService).upsertTrack(captor.capture());
+        TrackNode node = captor.getValue();
+        assertThat(node.id()).startsWith("track-");
+        assertThat(node.affiliation()).isEqualTo(Affiliation.HOSTILE);
+        assertThat(node.domain()).isEqualTo(TrackDomain.AERIAL);
+        assertThat(node.latitude()).isEqualTo(39.05);
+    }
+
+    @Test
+    void upsertCircleZoneBuildsCircleNode() {
+        ExecutionPlan plan = new ExecutionPlan("plan-zone", "r", List.of(
+            new PlanAction.UpsertZone(
+                null, "zone-1", "No-Fly", ZoneType.RESTRICTED, ZoneShape.CIRCLE,
+                39.05, -77.18, 800.0, null)
+        ));
+
+        executor.execute(plan);
+
+        ArgumentCaptor<ZoneNode> captor = ArgumentCaptor.forClass(ZoneNode.class);
+        verify(entityService).upsertZone(captor.capture());
+        ZoneNode node = captor.getValue();
+        assertThat(node.shape()).isEqualTo(ZoneShape.CIRCLE);
+        assertThat(node.radiusMeters()).isEqualTo(800.0);
+        assertThat(node.centerLatitude()).isEqualTo(39.05);
+        assertThat(node.vertexLats()).isEmpty();
+    }
+
+    @Test
+    void upsertPolygonZoneFlattensVerticesToParallelArrays() {
+        ExecutionPlan plan = new ExecutionPlan("plan-poly", "r", List.of(
+            new PlanAction.UpsertZone(
+                null, "zone-1", "Patrol Box", ZoneType.PATROL, ZoneShape.POLYGON,
+                null, null, null, List.of(
+                    List.of(39.0, -77.2),
+                    List.of(39.1, -77.2),
+                    List.of(39.1, -77.1)))
+        ));
+
+        executor.execute(plan);
+
+        ArgumentCaptor<ZoneNode> captor = ArgumentCaptor.forClass(ZoneNode.class);
+        verify(entityService).upsertZone(captor.capture());
+        ZoneNode node = captor.getValue();
+        assertThat(node.shape()).isEqualTo(ZoneShape.POLYGON);
+        assertThat(node.vertexLats()).containsExactly(39.0, 39.1, 39.1);
+        assertThat(node.vertexLngs()).containsExactly(-77.2, -77.2, -77.1);
+    }
+
+    @Test
+    void removeZoneCallsEntityServiceDelete() {
+        ExecutionPlan plan = new ExecutionPlan("plan-rm", "r", List.of(
+            new PlanAction.RemoveZone("zone-abc")
+        ));
+
+        executor.execute(plan);
+
+        verify(entityService).deleteZone("zone-abc");
     }
 }

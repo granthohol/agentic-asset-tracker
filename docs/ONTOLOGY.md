@@ -11,6 +11,11 @@ We model the fleet as a **graph** in Neo4j, not a flat list of drones. Nodes hol
 | **Drone** | `id`, `latitude`, `longitude`, `batteryLevel`, `status`, `currentWaypointLat?`, `currentWaypointLng?` | Optional waypoint stored as **flat primitives** (Neo4j node props cannot be nested maps). Set when a command steers the drone toward a target. |
 | **Squadron** | `id`, `name`, `sectorId` | Groups drones by operational area (e.g. sector for planner queries). |
 | **Objective** | `id`, `name`, `priority`, `centerLatitude?`, `centerLongitude?`, `targetEntityId?`, `radiusMeters?` | Mission the squadron is deployed for. Location fields are all optional — many objectives have no fixed location (see below). |
+| **Track** | `id`, `name`, `affiliation` (`FRIENDLY`\|`HOSTILE`\|`UNKNOWN`), `domain` (`AERIAL`\|`GROUND`), `latitude`, `longitude` | A static tracked contact placed on the map. **Not** a drone — it has no telemetry feed. |
+| **Waypoint** | `id`, `name`, `latitude`, `longitude` | A durable, labeled point of interest. **Distinct** from a drone's ephemeral `currentWaypoint` motion target. |
+| **Zone** | `id`, `name`, `type` (`RESTRICTED`\|`PATROL`), `shape` (`CIRCLE`\|`POLYGON`), circle: `centerLatitude`/`centerLongitude`/`radiusMeters`; polygon: parallel `vertexLats[]`/`vertexLngs[]` | A named area. Polygon vertices are stored as **two parallel primitive arrays** (same flat-props constraint as drone waypoints). |
+
+**Map entities (Track / Waypoint / Zone)** are ontology *annotations* the operator or agent adds to the map. They are created/edited synchronously through `EntityService` (both the manual REST path and the plan `upsert*`/`remove*` ops), which writes Neo4j **and** broadcasts over `/ws/entities`. The agent reads them via `list_tracks` / `list_waypoints` / `list_zones` (+ `get_*_by_id`) and writes them via the entity `PlanAction` ops (see [PLAN.md](PLAN.md)). An Objective's `targetEntityId` may point at a Track or Zone id.
 
 ### Example node properties (conceptual)
 

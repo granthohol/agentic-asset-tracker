@@ -2,12 +2,14 @@ import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPoi
 
 import DroneMap from './components/DroneMap'
 import CommandPanel from './components/CommandPanel'
+import EntityToolbar from './components/EntityToolbar'
 import { requestPlan, executePlan, cancelMission } from './api'
 import type { ExecutionPlan } from './types/plan'
 import type { AcceptedRoute } from './types/route'
 import type { MissionObjective } from './types/missionObjective'
 import type { MissionCard } from './types/missionCard'
 import { summarizePlan } from './utils/summarizePlan'
+import { useEntityFeed } from './hooks/useEntityFeed'
 import './App.css'
 
 interface Toast {
@@ -69,6 +71,9 @@ function droneIdsFromPlan(plan: ExecutionPlan): string[] {
 }
 
 function App() {
+  // Subscribe once to the persistent-entity feed (tracks/waypoints/zones).
+  useEntityFeed();
+
   const [pendingPlan, setPendingPlan] = useState<ExecutionPlan | null>(null);
   const [acceptedRoutes, setAcceptedRoutes] = useState<AcceptedRoute[]>([]);
   /** Disturbance / AOI circles — survive approve until the mission routes finish. */
@@ -273,6 +278,7 @@ function App() {
           activeObjectives={activeObjectives}
           onRoutesCompleted={handleRoutesCompleted}
         />
+        <EntityToolbar />
       </div>
     </div>
   );
