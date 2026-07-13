@@ -1,6 +1,7 @@
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 
 import type { MissionCard } from "../types/missionCard";
+import { describePlanSteps } from "../utils/summarizePlan";
 
 interface CommandPanelProps {
     planning: boolean;
@@ -43,10 +44,17 @@ export default function CommandPanel({
     onStop,
 }: CommandPanelProps) {
     const [command, setCommand] = useState("");
+    const [expanded, setExpanded] = useState(false);
     const missionRunning = missionCard?.status === "running";
     const busy = planning || executing || stopping || missionRunning;
     const status = headerStatus(planning, executing, stopping, missionCard);
     const fault = toast?.kind === "error" ? toast.message : null;
+
+    // Collapse the detail view whenever a different plan takes over the puck.
+    const planId = missionCard?.planId ?? null;
+    useEffect(() => {
+        setExpanded(false);
+    }, [planId]);
 
     const submit = (e: FormEvent) => {
         e.preventDefault();
@@ -98,7 +106,20 @@ export default function CommandPanel({
                         className={`command-panel__ticket command-panel__ticket--${missionCard.status}`}
                     >
                         <div className="command-panel__ticket-head">
-                            <p className="command-panel__ticket-title">{missionCard.summary}</p>
+                            <button
+                                type="button"
+                                className="command-panel__ticket-toggle"
+                                onClick={() => setExpanded((v) => !v)}
+                                aria-expanded={expanded}
+                            >
+                                <span
+                                    className={`command-panel__ticket-chevron${expanded ? " command-panel__ticket-chevron--open" : ""}`}
+                                    aria-hidden="true"
+                                >
+                                    ▸
+                                </span>
+                                <span className="command-panel__ticket-title">{missionCard.summary}</span>
+                            </button>
                             <span className="command-panel__ticket-status">
                                 {missionCard.status === "proposed" ? "Proposed" : "Running"}
                             </span>
@@ -113,6 +134,27 @@ export default function CommandPanel({
                                     </div>
                                 ))}
                             </dl>
+                        )}
+
+                        {expanded && (
+                            <div className="command-panel__ticket-expanded">
+                                {missionCard.plan.rationale?.trim() && (
+                                    <div className="command-panel__ticket-section">
+                                        <p className="command-panel__section-label">Agent reasoning</p>
+                                        <p className="command-panel__reasoning-text">
+                                            {missionCard.plan.rationale.trim()}
+                                        </p>
+                                    </div>
+                                )}
+                                <div className="command-panel__ticket-section">
+                                    <p className="command-panel__section-label">Plan</p>
+                                    <ol className="command-panel__step-list">
+                                        {describePlanSteps(missionCard.plan).map((step, i) => (
+                                            <li key={i}>{step}</li>
+                                        ))}
+                                    </ol>
+                                </div>
+                            </div>
                         )}
 
                         <div className="command-panel__actions">

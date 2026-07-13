@@ -42,8 +42,12 @@ public class PlanExecutor {
 
     private static final Logger log = LoggerFactory.getLogger(PlanExecutor.class);
 
-    /** Match frontend / edge STEER_STEP_DEG arrival slack (~0.002°). */
-    static final double ARRIVAL_DEG = 0.002;
+    // The edge glides to the waypoint and snaps to the *exact* target on the final sub-step
+    // (producer.py _steer_toward_target), so an arrived drone reports distance ~0. A tight
+    // epsilon means the FORM_UP gate waits for the last drone to truly reach its slot; a large
+    // slack (the old ~0.002° / ~222 m) advanced the swarm while drones were still gliding in.
+    // Keep in sync with DroneMap.tsx ARRIVAL_DEG.
+    static final double ARRIVAL_DEG = 0.0002;
     static final long FORM_UP_TIMEOUT_MS = 90_000L;
     static final long FORM_UP_POLL_MS = 300L;
 

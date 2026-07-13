@@ -50,7 +50,6 @@ TURN_NOISE_RAD_PER_S = 0.6       # stddev of random angular acceleration
 TURN_DAMP_PER_S = 0.8            # pulls turn_rate back toward straight-line flight
 MAX_TURN_RATE_RAD_PER_S = 0.5    # clamp so drones can't spin in place
 ROAM_RADIUS_DEG = 0.08           # soft boundary: turn back toward center beyond this
-STEER_ARRIVAL_DEG = 0.0015       # snap-to-target threshold (< frontend ARRIVAL_DEG slack)
 BATTERY_STEP_HZ = 1.0            # battery random-walk steps per second (rate-independent)
 
 PUBLISH_FREQ = 1.0
@@ -136,10 +135,11 @@ class SimulatedDrone:
         dlng = self.target_lng - self.longitude
         dist = math.hypot(dlat, dlng)
         step = STEER_SPEED_DEG_PER_S * dt
-        if dist <= max(STEER_ARRIVAL_DEG, step):
-            # Close enough: snap to the target and hold station. step_physics keeps
-            # calling steer while target_* is set, so the drone stays put until a new
-            # SET_WAYPOINT or a CLEAR_WAYPOINT arrives.
+        if dist <= step:
+            # Only the final sub-step (<= one tick of travel) is snapped, so the approach
+            # glides in at the same ground speed instead of teleporting the last stretch.
+            # step_physics keeps calling steer while target_* is set, so the drone holds
+            # station until a new SET_WAYPOINT or a CLEAR_WAYPOINT arrives.
             self.latitude = self.target_lat
             self.longitude = self.target_lng
         else:

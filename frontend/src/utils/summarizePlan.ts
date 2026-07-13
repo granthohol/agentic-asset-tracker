@@ -106,3 +106,75 @@ export function summarizePlan(plan: ExecutionPlan): PlanSummary {
 
     return { summary, details };
 }
+
+/** One grouped line per mission_type across all setWaypoints, in first-seen order. */
+function describeWaypointGroups(plan: ExecutionPlan): string[] {
+    const order: string[] = [];
+    const counts = new Map<string, number>();
+    for (const a of plan.actions) {
+        if (a.op !== "setWaypoint") continue;
+        const key = (a.mission_type ?? "MOVE").toUpperCase();
+        if (!counts.has(key)) order.push(key);
+        counts.set(key, (counts.get(key) ?? 0) + 1);
+    }
+    return order.map((key) => {
+        const n = counts.get(key) ?? 0;
+        return `${titleCaseMission(key)}: ${n} ${n === 1 ? "drone" : "drones"}`;
+    });
+}
+
+function cleanName(raw: string | undefined, fallback: string): string {
+    return (raw ?? "").trim().replace(/\s*\(stub\)\s*$/i, "").trim() || fallback;
+}
+
+/**
+ * Human-readable breakdown of a plan's actions for the expanded puck view. Non-motion
+ * actions render one line each in order; all setWaypoints collapse into grouped lines by
+ * mission_type (emitted where the first waypoint appears), so a 12-waypoint swarm shows two
+ * lines. Unknown ops (e.g. entity ops not in the frontend union) fall back to a title-cased op.
+ */
+export function describePlanSteps(plan: ExecutionPlan): string[] {
+    const steps: string[] = [];
+    let waypointsEmitted = false;
+
+    for (const a of plan.actions) {
+        switch (a.op) {
+            case "setWaypoint": {
+                if (waypointsEmitted) break;
+                waypointsEmitted = true;
+                steps.push(...describeWaypointGroups(plan));
+                break;
+            }
+            case "upsertObjective": {
+                const loc =
+                    a.centerLatitude != null && a.centerLongitude != null
+                        ? ` @ ${formatCoord(a.centerLatitude)}, ${formatCoord(a.centerLongitude)}`
+                        : "";
+                steps.push(`Objective "${cleanName(a.name, "objective")}"${loc}`);
+                break;
+            }
+            case "upsertSquadron":
+                steps.push(`New squadron "${cleanName(a.name, "squadron")}"`);
+                break;
+            case "deploySquadronToObjective":
+                steps.push("Deploy squadron → objective");
+                break;
+            case "assignDroneToSquadron":
+                steps.push(`Assign ${a.droneId} → squadron`);
+                break;
+            case "removeDroneAssignment":
+                steps.push(`Unassign ${a.droneId}`);
+                break;
+            case "removeSquadronFromObjective":
+                steps.push("Undeploy squadron");
+                break;
+            case "clearWaypoint":
+                steps.push(`Clear waypoint ${a.droneId}`);
+                break;
+            default:
+                steps.push(titleCaseMission((a as { op: string }).op));
+                break;
+        }
+    }
+    return steps;
+}

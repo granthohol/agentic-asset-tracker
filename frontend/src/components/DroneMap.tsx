@@ -24,8 +24,11 @@ const EntityPlacementMemo = memo(EntityPlacement);
 const EntityCreateFormMemo = memo(EntityCreateForm);
 const EntityInspectorMemo = memo(EntityInspector);
 
-/** Matches edge/producer.py STEER_STEP_DEG arrival snap (with slack for telemetry lag). */
-const ARRIVAL_DEG = 0.002;
+// The edge glides in and snaps to the exact target on the final sub-step (producer.py), so an
+// arrived drone reports distance ~0. A tight epsilon keeps ADVANCE completion / overlay-clear
+// (and the CLEAR_WAYPOINT that resumes roaming) from firing while drones are still ~200 m out.
+// Keep in sync with PlanExecutor.ARRIVAL_DEG.
+const ARRIVAL_DEG = 0.0002;
 
 function distanceDegrees(
     a: { latitude: number; longitude: number },
