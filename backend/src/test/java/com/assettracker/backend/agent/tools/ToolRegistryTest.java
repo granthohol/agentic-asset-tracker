@@ -13,6 +13,7 @@ import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
 
 import com.assettracker.backend.agent.formation.FormationService;
+import com.assettracker.backend.graph.DroneDetail;
 import com.assettracker.backend.graph.DroneNode;
 import com.assettracker.backend.graph.GraphService;
 import com.assettracker.backend.graph.SquadronNode;
@@ -41,11 +42,11 @@ class ToolRegistryTest {
             "list_squadrons", "list_objectives", "list_drones", "get_drone_by_id",
             "get_drones_in_squadron", "get_drones_by_status", "get_low_battery_drones",
             "get_low_battery_drones_in_sector", "get_squadrons_for_objective", "get_drones_near",
-            "list_formations", "preview_formation",
+            "list_formations", "preview_formation", "preview_two_phase",
             "list_tracks", "list_waypoints", "list_zones",
             "get_track_by_id", "get_waypoint_by_id", "get_zone_by_id"
         );
-        assertThat(names).hasSize(18);
+        assertThat(names).hasSize(19);
 
         for (JsonNode spec : specs) {
             assertThat(spec.hasNonNull("name")).isTrue();
@@ -76,6 +77,53 @@ class ToolRegistryTest {
         assertThat(result.isArray()).isTrue();
         assertThat(result).hasSize(3);
         assertThat(result.findValuesAsText("type")).contains("RING", "WEDGE", "LINE");
+    }
+
+    @Test
+    void invokeListDronesReturnsColumnarTrimmedRoundedTable() {
+        when(graph.listDrones()).thenReturn(List.of(
+            new DroneNode("drone-000", 39.073113, -89.401212, 80, DroneStatus.ACTIVE, null),
+            new DroneNode("drone-001", 39.060000, -89.400000, 55, DroneStatus.ACTIVE, null)
+        ));
+
+        JsonNode result = registry.invoke("list_drones", null);
+
+        List<String> fields = new java.util.ArrayList<>();
+        result.get("fields").forEach(f -> fields.add(f.asText()));
+        assertThat(fields).containsExactly("id", "lat", "lng");
+
+        assertThat(result.get("rows")).hasSize(2);
+        JsonNode row0 = result.get("rows").get(0);
+        assertThat(row0).hasSize(3); // battery/status trimmed out
+        assertThat(row0.get(0).asText()).isEqualTo("drone-000");
+        assertThat(row0.get(1).asDouble()).isEqualTo(39.07311); // rounded to 5 dp
+        assertThat(row0.get(2).asDouble()).isEqualTo(-89.40121);
+    }
+
+    @Test
+    void invokePreviewTwoPhaseReturnsCompactCenters() {
+        when(graph.getDroneById("drone-000")).thenReturn(Optional.of(new DroneDetail(
+            new DroneNode("drone-000", 39.00, -77.20, 80, DroneStatus.ACTIVE, null), null, null)));
+
+        ObjectNode args = mapper.createObjectNode();
+        args.put("formationType", "WEDGE");
+        ArrayNode ids = args.putArray("droneIds");
+        ids.add("drone-000");
+        ids.add("drone-001");
+        ids.add("drone-002");
+        args.put("aoiLat", 39.05);
+        args.put("aoiLng", -77.18);
+
+        JsonNode result = registry.invoke("preview_two_phase", args);
+
+        assertThat(result.get("formationType").asText()).isEqualTo("WEDGE");
+        assertThat(result.get("droneCount").asInt()).isEqualTo(3);
+        assertThat(result.get("advanceCenter").get("lat").asDouble()).isEqualTo(39.05);
+        assertThat(result.get("advanceCenter").get("lng").asDouble()).isEqualTo(-77.18);
+        // Standoff is pulled back from the AOI toward the leader (due south here).
+        assertThat(result.get("formUpCenter").get("lat").asDouble()).isLessThan(39.05);
+        assertThat(result.has("slots")).isFalse(); // summary only, no per-slot payload
+        verify(graph).getDroneById("drone-000");
     }
 
     @Test

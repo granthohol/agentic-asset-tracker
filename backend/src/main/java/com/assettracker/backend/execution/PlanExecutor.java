@@ -11,6 +11,7 @@ import org.springframework.stereotype.Component;
 
 import com.assettracker.backend.agent.plan.ExecutionPlan;
 import com.assettracker.backend.agent.plan.PlanAction;
+import com.assettracker.backend.agent.plan.PlanExpander;
 import com.assettracker.backend.command.CommandPublisher;
 import com.assettracker.backend.entity.EntityService;
 import com.assettracker.backend.graph.GraphWriter;
@@ -50,6 +51,7 @@ public class PlanExecutor {
     private final CommandPublisher commandPublisher;
     private final DroneService droneService;
     private final EntityService entityService;
+    private final PlanExpander planExpander;
     private final ObjectMapper mapper;
 
     public PlanExecutor(
@@ -57,12 +59,14 @@ public class PlanExecutor {
         CommandPublisher commandPublisher,
         DroneService droneService,
         EntityService entityService,
+        PlanExpander planExpander,
         ObjectMapper mapper
     ) {
         this.graphWriter = graphWriter;
         this.commandPublisher = commandPublisher;
         this.droneService = droneService;
         this.entityService = entityService;
+        this.planExpander = planExpander;
         this.mapper = mapper;
     }
 
@@ -87,10 +91,14 @@ public class PlanExecutor {
         ExecutionContext ctx = new ExecutionContext(plan.planId());
         List<FormUpTarget> formUps = new ArrayList<>();
         boolean waitedForFormUp = false;
-        log.info("Executing plan {} ({} action(s))", plan.planId(), plan.actions().size());
+        // Defensively flatten any applyFormation macros into per-drone setWaypoints so the
+        // FORM_UP -> wait -> ADVANCE gate below always operates on concrete waypoints. Plans
+        // from the orchestrator are already expanded; this covers any other producer.
+        List<PlanAction> actions = planExpander.expandActions(plan.actions());
+        log.info("Executing plan {} ({} action(s))", plan.planId(), actions.size());
 
-        for (int i = 0; i < plan.actions().size(); i++) {
-            PlanAction action = plan.actions().get(i);
+        for (int i = 0; i < actions.size(); i++) {
+            PlanAction action = actions.get(i);
             try {
                 if (action instanceof PlanAction.SetWaypoint sw
                     && !isFormUp(sw.missionType())
@@ -143,6 +151,9 @@ public class PlanExecutor {
                     formUps.add(new FormUpTarget(a.droneId(), a.targetLat(), a.targetLng()));
                 }
             }
+            case PlanAction.ApplyFormation a ->
+                // Unreachable: execute() flattens every applyFormation into setWaypoints first.
+                throw new IllegalStateException("applyFormation must be expanded before dispatch");
             case PlanAction.ClearWaypoint a -> {
                 graphWriter.clearDroneWaypoint(a.droneId());
                 commandPublisher.publishClearWaypoint(a.droneId());

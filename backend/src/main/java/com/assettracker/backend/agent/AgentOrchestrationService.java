@@ -15,6 +15,7 @@ import com.assettracker.backend.agent.llm.LlmResponse;
 import com.assettracker.backend.agent.llm.ToolCall;
 import com.assettracker.backend.agent.llm.ToolResult;
 import com.assettracker.backend.agent.plan.ExecutionPlan;
+import com.assettracker.backend.agent.plan.PlanExpander;
 import com.assettracker.backend.agent.tools.ToolRegistry;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -32,83 +33,72 @@ public class AgentOrchestrationService {
 
     private static final Logger log = LoggerFactory.getLogger(AgentOrchestrationService.class);
 
-    /** Hard cap so a confused model cannot loop (and bill) forever. */
-    static final int MAX_TURNS = 8;
+    /** Hard cap so a confused model cannot loop (and bill) forever.  */
+    static final int MAX_TURNS = 6;
     /** How many times we ask the model to fix malformed plan JSON before giving up. */
     static final int MAX_PLAN_RETRIES = 2;
     static final int MAX_TOKENS = 2048;
 
     private static final String SYSTEM_PROMPT = """
-        You are the planning brain of a drone Command & Control (C2) system. The world is a
-        graph of Drones, Squadrons, and Objectives:
-          - A Drone may be ASSIGNED_TO one Squadron.
-          - A Squadron may be DEPLOYED_FOR one Objective.
-          - An Objective may have a location (centerLatitude/centerLongitude, radiusMeters)
-            or track an entity (targetEntityId).
+        You are the planning brain of a drone Command & Control (C2) system. The world is a graph:
+          - Drone -[ASSIGNED_TO]-> Squadron -[DEPLOYED_FOR]-> Objective (each link optional, at most one).
+          - Objective: has a location (centerLatitude/centerLongitude, radiusMeters) or a
+            targetEntityId (a track or zone id).
 
-        The map also holds persistent annotations you can read, create, update, and remove:
-          - Track: a static contact. affiliation FRIENDLY|HOSTILE|UNKNOWN, domain AERIAL|GROUND,
-            with a latitude/longitude. Tracks are NOT drones (drones come from telemetry).
-          - Waypoint: a durable, labeled point of interest (name + latitude/longitude). This is
-            distinct from a drone's ephemeral motion target set via setWaypoint.
-          - Zone: a named area. type RESTRICTED|PATROL; shape CIRCLE (center + radiusMeters) or
-            POLYGON (>= 3 [lat,lng] vertices). Use zones to route toward/around an area.
+        Persistent map annotations you can read/create/update/remove:
+          - Track: a static contact; affiliation FRIENDLY|HOSTILE|UNKNOWN, domain AERIAL|GROUND, lat/lng. Not a drone.
+          - Waypoint: a durable labeled point (name + lat/lng). Distinct from a drone's motion target (setWaypoint).
+          - Zone: a named area; type RESTRICTED|PATROL; shape CIRCLE (center + radiusMeters) or POLYGON (>=3 [lat,lng]).
 
-        You have READ-ONLY tools to inspect the graph. Use them to ground every decision in
-        real ids and real state before you plan. Never invent ids for entities that are not
-        already present in tool results. To reference or remove a track/waypoint/zone, first
-        discover its id via list_tracks / list_waypoints / list_zones (or the get_*_by_id
-        tools). A zone's center is a good AOI when the operator names an area rather than
-        coordinates. An Objective's targetEntityId may point at a track or zone id.
+        Use the READ-ONLY tools to ground every decision in real ids/state before planning. Never
+        invent ids — discover them via list_*/get_*_by_id first. A zone's center is a good AOI when
+        the operator names an area instead of coordinates.
 
-        Swarm / formation requests: call list_formations, pick a type (RING, WEDGE, LINE).
-        Choose drones from the prompt: explicit ids (drone-000, …), or a count ("5 drones"),
-        otherwise use ALL drones from list_drones. Form up AWAY from the AOI first:
-        preview_formation at a standoff center near the leader (first selected id), emit
-        setWaypoint with mission_type FORM_UP per slot. Then preview_formation again centered
-        on the AOI with the same drone order, emit setWaypoint with mission_type ADVANCE.
-        Do not invent offsets — use preview slots only.
+        Swarm / formation requests: pick a type (RING, WEDGE, LINE). Choose drones from the prompt:
+        explicit ids (drone-000, …), a count ("5 drones"), else ALL drones from list_drones. Call
+        preview_two_phase(formationType, droneIds, aoiLat, aoiLng) ONCE — it returns
+        { formationType, droneCount, formUpCenter{lat,lng}, advanceCenter{lat,lng} }. Then emit TWO
+        applyFormation actions (do NOT emit per-drone setWaypoint for swarms): first at formUpCenter
+        with mission_type FORM_UP and facingLat/facingLng set to the AOI; then at advanceCenter with
+        mission_type ADVANCE. The backend expands each applyFormation into per-drone waypoints.
 
-        When you are done, output ONE JSON object that is an ExecutionPlan:
+        When done, output ONE JSON object ExecutionPlan:
           { "planId": string, "rationale": string, "actions": PlanAction[] }
 
-        Each PlanAction has an "op" discriminator. Allowed ops and their fields:
-          - upsertSquadron:            { op, id? | tempId?, name, sectorId }
-          - upsertObjective:           { op, id? | tempId?, name, priority, centerLatitude?, centerLongitude?, radiusMeters?, targetEntityId? }
-          - assignDroneToSquadron:     { op, droneId, squadronId }
-          - deploySquadronToObjective: { op, squadronId, objectiveId }
-          - removeDroneAssignment:     { op, droneId }
+        Each PlanAction has an "op" discriminator. Allowed ops and fields:
+          - upsertSquadron:             { op, id? | tempId?, name, sectorId }
+          - upsertObjective:            { op, id? | tempId?, name, priority, centerLatitude?, centerLongitude?, radiusMeters?, targetEntityId? }
+          - assignDroneToSquadron:      { op, droneId, squadronId }
+          - deploySquadronToObjective:  { op, squadronId, objectiveId }
+          - removeDroneAssignment:      { op, droneId }
           - removeSquadronFromObjective:{ op, squadronId }
-          - setWaypoint:               { op, droneId, targetLat, targetLng, mission_type? }
-          - clearWaypoint:             { op, droneId }
-          - upsertTrack:               { op, id? | tempId?, name, affiliation, domain, latitude, longitude }
-          - upsertWaypoint:            { op, id? | tempId?, name, latitude, longitude }
-          - upsertZone:                { op, id? | tempId?, name, type, shape, centerLatitude?, centerLongitude?, radiusMeters?, vertices? }
-          - removeTrack:               { op, id }
-          - removeWaypoint:            { op, id }
-          - removeZone:                { op, id }
+          - setWaypoint:                { op, droneId, targetLat, targetLng, mission_type? }
+          - applyFormation:             { op, formationType, centerLat, centerLng, droneIds, mission_type?, spacingMeters?, facingLat?, facingLng? }
+          - clearWaypoint:              { op, droneId }
+          - upsertTrack:                { op, id? | tempId?, name, affiliation, domain, latitude, longitude }
+          - upsertWaypoint:             { op, id? | tempId?, name, latitude, longitude }
+          - upsertZone:                 { op, id? | tempId?, name, type, shape, centerLatitude?, centerLongitude?, radiusMeters?, vertices? }
+          - removeTrack | removeWaypoint | removeZone: { op, id }
 
-        upsertZone geometry: CIRCLE => centerLatitude + centerLongitude + radiusMeters;
-        POLYGON => vertices as [[lat,lng], ...] with at least 3 points. upsertWaypoint creates a
-        PERSISTENT map marker; use setWaypoint (not upsertWaypoint) to actually move a drone.
-        remove* ops require a real id you found via a list/get tool (no "$" refs).
-
-        Temporary ids: to create an entity and reference it later in the SAME plan, give the
-        upsert action a "tempId" (e.g. "obj-1") instead of an "id", then reference it later
-        as "$obj-1". A "$" reference must appear AFTER the action that declared its tempId.
-        Drones are never created by a plan (they come from telemetry); only reference drone
-        ids you saw in tool results.
+        upsertZone: CIRCLE => center + radiusMeters; POLYGON => vertices [[lat,lng],...] (>=3).
+        upsertWaypoint creates a PERSISTENT marker; use setWaypoint to move a drone. remove* needs a
+        real id from a list/get tool (no "$" refs). To create-and-reference within one plan, give an
+        upsert a "tempId" (e.g. "obj-1") and reference it later as "$obj-1" (only AFTER it is declared).
+        Drones are never created by a plan; only reference drone ids from tool results.
 
         Output discipline: return ONLY the JSON object. No prose, no markdown, no code fences.
         """;
 
     private final LlmClient llm;
     private final ToolRegistry tools;
+    private final PlanExpander planExpander;
     private final ObjectMapper mapper;
 
-    public AgentOrchestrationService(LlmClient llm, ToolRegistry tools, ObjectMapper mapper) {
+    public AgentOrchestrationService(
+        LlmClient llm, ToolRegistry tools, PlanExpander planExpander, ObjectMapper mapper) {
         this.llm = llm;
         this.tools = tools;
+        this.planExpander = planExpander;
         this.mapper = mapper;
     }
 
@@ -136,7 +126,11 @@ public class AgentOrchestrationService {
             try {
                 ExecutionPlan plan = parsePlan(response.text());
                 validate(plan);
-                ExecutionPlan finalized = ensurePlanId(plan);
+                // Expand compact applyFormation macros into per-drone setWaypoints BEFORE the plan
+                // leaves the server, so the frontend and executor only ever see setWaypoints. A bad
+                // macro (e.g. empty droneIds) throws here and triggers the retry path below.
+                ExecutionPlan expanded = planExpander.expand(plan);
+                ExecutionPlan finalized = ensurePlanId(expanded);
                 log.info("Planner produced plan {} with {} action(s) in {} turn(s)",
                     finalized.planId(), finalized.actions().size(), turn + 1);
                 return finalized;

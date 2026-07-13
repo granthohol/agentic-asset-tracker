@@ -14,8 +14,11 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
 import org.mockito.Mockito;
 
+import com.assettracker.backend.agent.formation.FormationService;
+import com.assettracker.backend.agent.formation.FormationType;
 import com.assettracker.backend.agent.plan.ExecutionPlan;
 import com.assettracker.backend.agent.plan.PlanAction;
+import com.assettracker.backend.agent.plan.PlanExpander;
 import com.assettracker.backend.command.CommandPublisher;
 import com.assettracker.backend.entity.EntityService;
 import com.assettracker.backend.graph.Affiliation;
@@ -38,8 +41,9 @@ class PlanExecutorTest {
     private final CommandPublisher commandPublisher = Mockito.mock(CommandPublisher.class);
     private final DroneService droneService = Mockito.mock(DroneService.class);
     private final EntityService entityService = Mockito.mock(EntityService.class);
-    private final PlanExecutor executor =
-        new PlanExecutor(graphWriter, commandPublisher, droneService, entityService, new ObjectMapper());
+    private final PlanExpander planExpander = new PlanExpander(new FormationService());
+    private final PlanExecutor executor = new PlanExecutor(
+        graphWriter, commandPublisher, droneService, entityService, planExpander, new ObjectMapper());
 
     @Test
     void mintsTempIdAndResolvesItForLaterActions() {
@@ -87,6 +91,25 @@ class PlanExecutorTest {
         verify(commandPublisher, times(4)).publishSetWaypoint(
             Mockito.anyString(), Mockito.anyDouble(), Mockito.anyDouble(), Mockito.any());
         verify(droneService, Mockito.atLeastOnce()).getDrone("drone-000");
+    }
+
+    @Test
+    void applyFormationExpandsToPerDroneSetWaypoints() {
+        ExecutionPlan plan = new ExecutionPlan("plan-form", "r", List.of(
+            new PlanAction.ApplyFormation(
+                FormationType.RING, 39.05, -77.18,
+                List.of("drone-000", "drone-001", "drone-002"),
+                "RECON", null, null, null)
+        ));
+
+        executor.execute(plan);
+
+        // The macro expands to one setWaypoint per drone (no ADVANCE gate for a single phase).
+        verify(commandPublisher, times(3)).publishSetWaypoint(
+            Mockito.anyString(), Mockito.anyDouble(), Mockito.anyDouble(), Mockito.eq("RECON"));
+        verify(commandPublisher).publishSetWaypoint(
+            Mockito.eq("drone-000"), Mockito.anyDouble(), Mockito.anyDouble(), Mockito.eq("RECON"));
+        verify(graphWriter, times(3)).setDroneWaypoint(Mockito.anyString(), Mockito.any());
     }
 
     @Test

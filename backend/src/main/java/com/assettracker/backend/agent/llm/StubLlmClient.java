@@ -28,11 +28,13 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
  *
  * <p>Two-phase swarm:
  * <ol>
- *   <li>list_squadrons / list_drones / list_formations</li>
- *   <li>preview_formation at a <b>standoff</b> center near the leader (FORM_UP)</li>
- *   <li>preview_formation at the AOI (ADVANCE)</li>
- *   <li>ExecutionPlan: objective + FORM_UP setWaypoints + ADVANCE setWaypoints</li>
+ *   <li>list_squadrons / list_drones / list_formations / list_* entities</li>
+ *   <li>preview_two_phase (one call → compact FORM_UP + ADVANCE centers)</li>
+ *   <li>ExecutionPlan: objective + two {@code applyFormation} macros (FORM_UP then ADVANCE)</li>
  * </ol>
+ *
+ * <p>The orchestrator pre-expands each {@code applyFormation} into per-drone {@code setWaypoint}s,
+ * so the offline path still exercises the executor's FORM_UP → ADVANCE gate.
  */
 @Component
 @ConditionalOnProperty(name = "llm.provider", havingValue = "stub", matchIfMissing = true)
@@ -69,7 +71,7 @@ public class StubLlmClient implements LlmClient {
     @Override
     public LlmResponse complete(LlmRequest request) {
         boolean hasListDrones = hasToolResult(request, "list_drones");
-        int previewCount = countToolResults(request, "preview_formation");
+        int twoPhaseCount = countToolResults(request, "preview_two_phase");
 
         if (!hasListDrones) {
             return LlmResponse.toolUse(
@@ -100,60 +102,31 @@ public class StubLlmClient implements LlmClient {
         FormationType type = inferFormationType(userCommand);
 
         if (droneIds.isEmpty()) {
+            // No drones to move: objective-only plan (no formation macro).
             ExecutionPlan plan = buildStubPlan(
-                firstIdFromTool(request, "list_squadrons"), userCommand, null, null, null);
+                firstIdFromTool(request, "list_squadrons"), userCommand, aoi, type, droneIds, null, null);
             return end(plan);
         }
 
-        // Turn 2: form-up preview at standoff near leader.
-        if (previewCount == 0) {
-            double[] leaderPos = droneLatLng(request, droneIds.get(0));
-            double[] formUp = FormationService.standoffCenter(
-                aoi[0], aoi[1],
-                leaderPos[0], leaderPos[1],
-                FormationService.DEFAULT_STANDOFF_METERS
-            );
+        // Turn 2: a single compact two-phase preview resolves both formation centers.
+        if (twoPhaseCount == 0) {
             return LlmResponse.toolUse(
-                "Previewing " + type + " FORM_UP at standoff under leader " + droneIds.get(0) + ".",
+                "Previewing " + type + " two-phase approach for " + droneIds.size() + " drone(s).",
                 List.of(new ToolCall(
-                    "call_preview_formup",
-                    "preview_formation",
-                    // Face the AOI so the wedge/line points at the disturbance.
-                    previewArgs(type, formUp[0], formUp[1], droneIds, aoi[0], aoi[1])
+                    "call_preview_two_phase",
+                    "preview_two_phase",
+                    twoPhaseArgs(type, droneIds, aoi[0], aoi[1])
                 ))
             );
         }
 
-        // Turn 3: advance preview centered on the AOI, same heading as the approach.
-        if (previewCount == 1) {
-            JsonNode formUpPreview = allToolContents(request, "preview_formation").get(0);
-            double formLat = formUpPreview.path("centerLat").asDouble(aoi[0] - 0.018);
-            double formLng = formUpPreview.path("centerLng").asDouble(aoi[1]);
-            // Point beyond the AOI along form-up → AOI so orientation matches FORM_UP.
-            double faceLat = aoi[0] + (aoi[0] - formLat);
-            double faceLng = aoi[1] + (aoi[1] - formLng);
-            return LlmResponse.toolUse(
-                "Previewing " + type + " ADVANCE on the AOI.",
-                List.of(new ToolCall(
-                    "call_preview_advance",
-                    "preview_formation",
-                    previewArgs(type, aoi[0], aoi[1], droneIds, faceLat, faceLng)
-                ))
-            );
-        }
-
-        // Turn 4: emit plan from both previews (order: first = form-up, second = advance).
-        List<JsonNode> previews = allToolContents(request, "preview_formation");
-        JsonNode formUpPreview = previews.get(0);
-        JsonNode advancePreview = previews.get(1);
-        String leaderId = droneIds.get(0);
+        // Turn 3: emit a plan with two applyFormation macros from the summary centers.
+        // The orchestrator expands these into per-drone FORM_UP/ADVANCE setWaypoints.
+        JsonNode summary = allToolContents(request, "preview_two_phase").get(0);
+        double[] formUp = centerFromSummary(summary, "formUpCenter", new double[] { aoi[0] - 0.018, aoi[1] });
+        double[] advance = centerFromSummary(summary, "advanceCenter", aoi);
         ExecutionPlan plan = buildStubPlan(
-            firstIdFromTool(request, "list_squadrons"),
-            userCommand,
-            formUpPreview,
-            advancePreview,
-            leaderId
-        );
+            firstIdFromTool(request, "list_squadrons"), userCommand, aoi, type, droneIds, formUp, advance);
         return end(plan);
     }
 
@@ -165,45 +138,44 @@ public class StubLlmClient implements LlmClient {
         }
     }
 
-    private ObjectNode previewArgs(
-        FormationType type,
-        double lat,
-        double lng,
-        List<String> droneIds,
-        double facingLat,
-        double facingLng
-    ) {
+    private ObjectNode twoPhaseArgs(FormationType type, List<String> droneIds, double aoiLat, double aoiLng) {
         ObjectNode args = mapper.createObjectNode();
-        args.put("type", type.name());
-        args.put("centerLatitude", lat);
-        args.put("centerLongitude", lng);
-        args.put("facingLatitude", facingLat);
-        args.put("facingLongitude", facingLng);
+        args.put("formationType", type.name());
         ArrayNode ids = args.putArray("droneIds");
         for (String id : droneIds) {
             ids.add(id);
         }
+        args.put("aoiLat", aoiLat);
+        args.put("aoiLng", aoiLng);
         return args;
     }
 
+    /** Read a {lat,lng} center from a preview_two_phase summary, falling back if absent. */
+    private static double[] centerFromSummary(JsonNode summary, String key, double[] fallback) {
+        JsonNode c = summary == null ? null : summary.get(key);
+        if (c != null && c.hasNonNull("lat") && c.hasNonNull("lng")) {
+            return new double[] { c.get("lat").asDouble(), c.get("lng").asDouble() };
+        }
+        return fallback;
+    }
+
+    /**
+     * Build the stub plan: an objective + squadron deploy, plus (when drones are selected) two
+     * compact {@code applyFormation} macros. The orchestrator expands each macro into per-drone
+     * FORM_UP/ADVANCE setWaypoints before the plan leaves the server.
+     */
     private ExecutionPlan buildStubPlan(
         String squadronId,
         String userCommand,
-        JsonNode formUpPreview,
-        JsonNode advancePreview,
-        String leaderId
+        double[] aoi,
+        FormationType type,
+        List<String> droneIds,
+        double[] formUpCenter,
+        double[] advanceCenter
     ) {
         List<PlanAction> actions = new ArrayList<>();
-        double[] aoi = parseLatLng(userCommand);
-        double aoiLat = advancePreview != null && advancePreview.has("centerLat")
-            ? advancePreview.get("centerLat").asDouble()
-            : aoi[0];
-        double aoiLng = advancePreview != null && advancePreview.has("centerLng")
-            ? advancePreview.get("centerLng").asDouble()
-            : aoi[1];
-        String formationType = formUpPreview != null && formUpPreview.has("type")
-            ? formUpPreview.get("type").asText()
-            : "RING";
+        double aoiLat = aoi[0];
+        double aoiLng = aoi[1];
 
         actions.add(new PlanAction.UpsertObjective(
             null, "obj-1", "Observe disturbance", 1, aoiLat, aoiLng, 500.0, null
@@ -216,41 +188,24 @@ public class StubLlmClient implements LlmClient {
             actions.add(new PlanAction.DeploySquadronToObjective("$squad-1", "$obj-1"));
         }
 
-        int formUpCount = appendWaypoints(actions, formUpPreview, "FORM_UP");
-        int advanceCount = appendWaypoints(actions, advancePreview, "ADVANCE");
-
         String cmd = userCommand == null ? "(no command)" : userCommand;
         String rationale;
-        if (formUpCount == 0) {
+        // Inline (not a boolean var) so null-analysis narrows the fields inside the else branch.
+        if (droneIds == null || droneIds.isEmpty() || formUpCenter == null || advanceCenter == null) {
             rationale = "Stub plan for: \"" + cmd + "\". Creates an objective and deploys assets to it.";
         } else {
-            rationale = "Stub plan for: \"" + cmd + "\". " + formationType
-                + ": form up under leader " + (leaderId == null ? "?" : leaderId)
-                + " (" + formUpCount + " drones), then ADVANCE on the disturbance"
-                + (advanceCount > 0 ? " (" + advanceCount + " slots)" : "") + ".";
+            // FORM_UP faces the AOI; ADVANCE keeps the approach heading (points beyond the AOI).
+            double faceLat = aoiLat + (aoiLat - formUpCenter[0]);
+            double faceLng = aoiLng + (aoiLng - formUpCenter[1]);
+            actions.add(new PlanAction.ApplyFormation(
+                type, formUpCenter[0], formUpCenter[1], droneIds, "FORM_UP", null, aoiLat, aoiLng));
+            actions.add(new PlanAction.ApplyFormation(
+                type, advanceCenter[0], advanceCenter[1], droneIds, "ADVANCE", null, faceLat, faceLng));
+            rationale = "Stub plan for: \"" + cmd + "\". " + type
+                + ": form up under leader " + droneIds.get(0)
+                + " (" + droneIds.size() + " drones), then ADVANCE on the disturbance.";
         }
         return new ExecutionPlan("plan-" + UUID.randomUUID(), rationale, actions);
-    }
-
-    private int appendWaypoints(List<PlanAction> actions, JsonNode preview, String missionType) {
-        int count = 0;
-        if (preview == null || !preview.has("slots") || !preview.get("slots").isArray()) {
-            return 0;
-        }
-        for (JsonNode slot : preview.get("slots")) {
-            String droneId = slot.path("droneId").asText(null);
-            if (droneId == null || droneId.isBlank()) {
-                continue;
-            }
-            actions.add(new PlanAction.SetWaypoint(
-                droneId,
-                slot.get("targetLat").asDouble(),
-                slot.get("targetLng").asDouble(),
-                missionType
-            ));
-            count++;
-        }
-        return count;
     }
 
     static FormationType inferFormationType(String userCommand) {
@@ -504,26 +459,50 @@ public class StubLlmClient implements LlmClient {
         return out;
     }
 
-    /** All drone ids from list_drones (order preserved). */
+    /** All drone ids from list_drones (order preserved). Parses the columnar {fields, rows} shape. */
     private List<String> collectAllDroneIds(LlmRequest request) {
         List<String> ids = new ArrayList<>();
-        for (LlmMessage m : request.messages()) {
-            if (m.role() != LlmMessage.Role.TOOL) {
-                continue;
-            }
-            for (ToolResult r : m.toolResults()) {
-                if (!"list_drones".equals(r.toolName()) || r.content() == null || !r.content().isArray()) {
-                    continue;
+        for (JsonNode content : allToolContents(request, "list_drones")) {
+            addDroneIds(content, ids);
+        }
+        return ids;
+    }
+
+    private static void addDroneIds(JsonNode content, List<String> ids) {
+        // Legacy object-array shape ([{id, ...}, ...]).
+        if (content.isArray()) {
+            for (JsonNode element : content) {
+                JsonNode id = element.get("id");
+                if (id != null && !id.isNull()) {
+                    ids.add(id.asText());
                 }
-                for (JsonNode element : r.content()) {
-                    JsonNode id = element.get("id");
-                    if (id != null && !id.isNull()) {
-                        ids.add(id.asText());
-                    }
+            }
+            return;
+        }
+        // Compact columnar shape ({"fields":["id","lat","lng"], "rows":[[...], ...]}).
+        JsonNode fields = content.get("fields");
+        JsonNode rows = content.get("rows");
+        if (fields == null || !fields.isArray() || rows == null || !rows.isArray()) {
+            return;
+        }
+        int idIdx = -1;
+        for (int i = 0; i < fields.size(); i++) {
+            if ("id".equals(fields.get(i).asText())) {
+                idIdx = i;
+                break;
+            }
+        }
+        if (idIdx < 0) {
+            return;
+        }
+        for (JsonNode row : rows) {
+            if (row.isArray() && row.size() > idIdx) {
+                JsonNode id = row.get(idIdx);
+                if (id != null && !id.isNull()) {
+                    ids.add(id.asText());
                 }
             }
         }
-        return ids;
     }
 
     /**
@@ -629,28 +608,6 @@ public class StubLlmClient implements LlmClient {
             return null;
         }
         return null;
-    }
-
-    /** Position of a specific drone from list_drones; falls back to stub AOI offset. */
-    private double[] droneLatLng(LlmRequest request, String droneId) {
-        for (LlmMessage m : request.messages()) {
-            if (m.role() != LlmMessage.Role.TOOL) {
-                continue;
-            }
-            for (ToolResult r : m.toolResults()) {
-                if (!"list_drones".equals(r.toolName()) || r.content() == null || !r.content().isArray()) {
-                    continue;
-                }
-                for (JsonNode d : r.content()) {
-                    JsonNode id = d.get("id");
-                    if (id != null && droneId.equalsIgnoreCase(id.asText())
-                        && d.has("latitude") && d.has("longitude")) {
-                        return new double[] { d.get("latitude").asDouble(), d.get("longitude").asDouble() };
-                    }
-                }
-            }
-        }
-        return new double[] { STUB_LAT - 0.02, STUB_LNG };
     }
 
     static double[] parseLatLng(String userCommand) {

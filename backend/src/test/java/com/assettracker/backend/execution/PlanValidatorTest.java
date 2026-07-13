@@ -7,6 +7,7 @@ import java.util.List;
 
 import org.junit.jupiter.api.Test;
 
+import com.assettracker.backend.agent.formation.FormationType;
 import com.assettracker.backend.agent.plan.ExecutionPlan;
 import com.assettracker.backend.agent.plan.PlanAction;
 import com.assettracker.backend.graph.Affiliation;
@@ -80,6 +81,44 @@ class PlanValidatorTest {
     void rejectsOutOfRangeWaypoint() {
         assertThatThrownBy(() -> validator.validate(plan(
             new PlanAction.SetWaypoint("drone-007", 200.0, -77.18, null)
+        )))
+            .isInstanceOf(IllegalArgumentException.class)
+            .hasMessageContaining("out of range");
+    }
+
+    @Test
+    void acceptsValidApplyFormation() {
+        assertThatCode(() -> validator.validate(plan(
+            new PlanAction.ApplyFormation(FormationType.RING, 39.05, -77.18,
+                List.of("drone-000", "drone-001"), "FORM_UP", null, 39.05, -77.18)
+        ))).doesNotThrowAnyException();
+    }
+
+    @Test
+    void rejectsApplyFormationWithEmptyDroneIds() {
+        assertThatThrownBy(() -> validator.validate(plan(
+            new PlanAction.ApplyFormation(FormationType.RING, 39.05, -77.18,
+                List.of(), "FORM_UP", null, null, null)
+        )))
+            .isInstanceOf(IllegalArgumentException.class)
+            .hasMessageContaining("droneIds");
+    }
+
+    @Test
+    void rejectsApplyFormationWithDollarRefDrone() {
+        assertThatThrownBy(() -> validator.validate(plan(
+            new PlanAction.ApplyFormation(FormationType.RING, 39.05, -77.18,
+                List.of("$drone-1"), "FORM_UP", null, null, null)
+        )))
+            .isInstanceOf(IllegalArgumentException.class)
+            .hasMessageContaining("literal id");
+    }
+
+    @Test
+    void rejectsApplyFormationOutOfRangeCenter() {
+        assertThatThrownBy(() -> validator.validate(plan(
+            new PlanAction.ApplyFormation(FormationType.RING, 200.0, -77.18,
+                List.of("drone-000"), "FORM_UP", null, null, null)
         )))
             .isInstanceOf(IllegalArgumentException.class)
             .hasMessageContaining("out of range");

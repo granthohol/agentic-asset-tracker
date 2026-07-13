@@ -37,6 +37,7 @@ Every action is an object with an `op` discriminator. Server-side deserializatio
 | `removeDroneAssignment` | `droneId` | — | `GraphWriter.removeDroneAssignment` |
 | `removeSquadronFromObjective` | `squadronId` | — | `GraphWriter.removeSquadronFromObjective` |
 | `setWaypoint` | `droneId`, `targetLat`, `targetLng` | `mission_type` | `CommandPublisher.publishSetWaypoint` **and** `GraphWriter.setDroneWaypoint` |
+| `applyFormation` | `formationType`, `centerLat`, `centerLng`, `droneIds` | `mission_type`, `spacingMeters`, `facingLat`, `facingLng` | **Expanded server-side** into N× `setWaypoint` (see note) |
 | `clearWaypoint` | `droneId` | — | `GraphWriter.clearDroneWaypoint` |
 | `upsertTrack` | `name`, `affiliation`, `domain`, `latitude`, `longitude`, and (`id` **xor** `tempId`) | — | `EntityService.upsertTrack` |
 | `upsertWaypoint` | `name`, `latitude`, `longitude`, and (`id` **xor** `tempId`) | — | `EntityService.upsertWaypoint` |
@@ -50,6 +51,7 @@ Notes:
 - `droneId` is **never** server-minted — drones exist only because telemetry created them. A plan cannot conjure a drone.
 - `setWaypoint` is the one action that crosses both planes: it mirrors the target into Neo4j (so reads reflect intent immediately) **and** publishes a motion command to the edge. See [docs/COMMANDS.md](COMMANDS.md) for the `SET_WAYPOINT` wire shape.
 - `mission_type` is snake_case on the wire (it matches the command contract); the Java record maps it to `missionType`.
+- **`applyFormation` is a compact macro, not a distinct executable.** It exists only to cut the tokens the LLM emits (~2 actions for a two-phase swarm instead of ~100). A `PlanExpander` replaces each `applyFormation` with one `setWaypoint` per drone (geometry from `FormationService`) **before** the plan leaves the orchestrator, and again defensively at the top of the `PlanExecutor`. So `/api/plan` responses, the frontend overlays/mission card, `/api/execute-plan`, and the executor only ever see `setWaypoint`s — the wire contract downstream of the planner is unchanged. `applyFormation` has no direct executor dispatch (its `PlanExecutor` case throws, and is unreachable after expansion).
 - **Persistent vs. ephemeral waypoints:** `upsertWaypoint` creates a durable `:Waypoint` map marker (an ontology annotation). `setWaypoint` is unrelated — it is ephemeral drone motion tasking. Use `setWaypoint` to move a drone; use `upsertWaypoint` to place a labeled point of interest.
 - The `upsert*`/`remove*` **entity** ops route through `EntityService` (not `GraphWriter` directly), so each write persists to Neo4j **and** broadcasts over `/ws/entities` to the live map exactly like a manual edit. Discovery of existing entity ids is done via the read tools `list_tracks` / `list_waypoints` / `list_zones` (and `get_*_by_id`).
 - `remove*` ops require a literal id (no `$ref`); an Objective's `targetEntityId` may reference a track/zone id (including a `$tempId` created earlier in the same plan).
@@ -114,6 +116,6 @@ Adding a capability = adding one permitted record + one `@JsonSubTypes.Type` + o
 
 ---
 
-## Formations (planner tools, not plan ops)
+## Formations (planner tools + the `applyFormation` macro)
 
-Swarm layouts are computed by read-only tools (`list_formations`, `preview_formation`) — see [FORMATIONS.md](FORMATIONS.md). The plan still executes as N× `setWaypoint`; there is no `formFormation` op.
+Swarm layouts are computed by read-only tools (`list_formations`, `preview_formation`, `preview_two_phase`) — see [FORMATIONS.md](FORMATIONS.md). For a two-phase swarm the planner calls `preview_two_phase` once (compact FORM_UP + ADVANCE centers) and emits two `applyFormation` actions. The backend expands them into N× `setWaypoint` before execution, so the plan **still executes as `setWaypoint`s**; there is no `formFormation` op and no per-slot geometry on the wire from the model.

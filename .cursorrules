@@ -7,7 +7,7 @@ We are building a scalable Command and Control (C2) dashboard for distributed ha
 - Backend: Java 21, Spring Boot.
 - Phase 1 (Complete): REST API polling 50 mock drones.
 - Phase 2 (Complete): Event-driven streaming (Kafka, WebSockets) and Python edge mock data.
-- Phase 3 (Complete): Relational Ontology, C2 Write-Path, agentic LLM planning, map entities (tracks/waypoints/zones).
+- Phase 3 (Complete): Relational Ontology, C2 Write-Path, agentic LLM planning (real Anthropic Claude via the LlmClient seam, toggled by llm.provider; stub default), map entities (tracks/waypoints/zones). (MCP server intentionally deferred.)
 - Phase 4 (Complete): High-throughput optimization — 1000-drone scale, binary Protocol Buffers WS payload, batched persistence, and a Zustand + requestAnimationFrame client render loop with React.memo overlays.
 
 # More Detailed Project Writeup: Agentic Asset Tracker

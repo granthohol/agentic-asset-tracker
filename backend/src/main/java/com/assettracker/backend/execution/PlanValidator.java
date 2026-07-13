@@ -73,6 +73,26 @@ public class PlanValidator {
                 requireCoord(a.targetLat(), -90, 90, index, "setWaypoint.targetLat");
                 requireCoord(a.targetLng(), -180, 180, index, "setWaypoint.targetLng");
             }
+            case PlanAction.ApplyFormation a -> {
+                if (a.formationType() == null) {
+                    throw new IllegalArgumentException(
+                        "action " + index + " (applyFormation): formationType is required");
+                }
+                requireCoord(a.centerLat(), -90, 90, index, "applyFormation.centerLat");
+                requireCoord(a.centerLng(), -180, 180, index, "applyFormation.centerLng");
+                if (a.droneIds() == null || a.droneIds().isEmpty()) {
+                    throw new IllegalArgumentException(
+                        "action " + index + " (applyFormation): droneIds must be non-empty");
+                }
+                for (String droneId : a.droneIds()) {
+                    requireLiteral(droneId, index, "applyFormation.droneIds[]");
+                }
+                if (a.spacingMeters() != null && a.spacingMeters() <= 0) {
+                    throw new IllegalArgumentException(
+                        "action " + index + " (applyFormation): spacingMeters must be > 0");
+                }
+                requireLatLng(a.facingLat(), a.facingLng(), index, "applyFormation.facing");
+            }
             case PlanAction.ClearWaypoint a ->
                 requireLiteral(a.droneId(), index, "clearWaypoint.droneId");
             case PlanAction.UpsertTrack a -> {

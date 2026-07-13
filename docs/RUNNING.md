@@ -112,6 +112,46 @@ Important: do **not** `touch` or hand-create `telemetry-events.db`. SQLite creat
 
 The backend listens on port `8080` (HTTP + WebSocket).
 
+### Agent / LLM provider (stub vs Anthropic)
+
+The planning agent behind `POST /api/plan` (the in-app chatbot) is driven by an `LlmClient`
+bean, selected by the `llm.provider` property:
+
+| `llm.provider` | Bean | Needs a key? | Behavior |
+| -------------- | ---------------------- | ------------ | -------- |
+| `stub` (default) | `StubLlmClient` | No | Deterministic offline planner; great for demos and tests. |
+| `anthropic` | `AnthropicLlmClient` | Yes | Real Claude via the Anthropic Messages API. |
+
+Default is `stub`, so nothing extra is needed for offline dev and `@SpringBootTest`. To use
+real Claude, set two env vars before `bootRun`:
+
+```bash
+export ANTHROPIC_API_KEY=sk-ant-...      # from console.anthropic.com
+export LLM_PROVIDER=anthropic            # flips the active bean
+./gradlew bootRun
+```
+
+Optional overrides: `ANTHROPIC_MODEL` (default `claude-haiku-4-5`, the cheapest tier),
+`anthropic.base-url`, `anthropic.version`. If `llm.provider=anthropic` but the key is blank,
+the backend fails fast at startup with a clear message. The agent is read-only: it proposes
+an `ExecutionPlan` you approve in the UI; nothing mutates state until you accept.
+
+**Cost controls (important).** The premium models bill reasoning ("thinking") at the output
+rate, which makes each multi-turn plan surprisingly expensive. Sensible cheap defaults are
+baked in:
+
+| Setting | Default | Purpose |
+| ------- | ------- | ------- |
+| `ANTHROPIC_MODEL` | `claude-haiku-4-5` | Cheapest tier ($1/$5 per MTok). Use `claude-sonnet-5` for harder reasoning. |
+| `ANTHROPIC_THINKING` | `disabled` | No reasoning tokens for this structured task. `adaptive` re-enables (Sonnet/Opus only). |
+| `ANTHROPIC_EFFORT` | `low` | Reasoning depth when thinking is `adaptive` (`low`..`max`). |
+| `ANTHROPIC_PROMPT_CACHE` | `true` | Caches the identical-every-turn system prompt + tool specs (big input-cost cut). |
+
+For the cheapest possible planning, keep the default Haiku model with thinking `disabled`.
+If plan quality suffers on harder prompts, switch `ANTHROPIC_MODEL=claude-sonnet-5` (and
+optionally `ANTHROPIC_THINKING=adaptive ANTHROPIC_EFFORT=low`). Note: Haiku 4.5 does **not**
+support adaptive thinking, so only pair `ANTHROPIC_THINKING=adaptive` with a Sonnet/Opus model.
+
 ---
 
 ## 3. Start the Python Edge Producer

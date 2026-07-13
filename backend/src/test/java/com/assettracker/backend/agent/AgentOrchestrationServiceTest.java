@@ -14,6 +14,7 @@ import com.assettracker.backend.agent.formation.FormationService;
 import com.assettracker.backend.agent.llm.StubLlmClient;
 import com.assettracker.backend.agent.plan.ExecutionPlan;
 import com.assettracker.backend.agent.plan.PlanAction;
+import com.assettracker.backend.agent.plan.PlanExpander;
 import com.assettracker.backend.agent.tools.ToolRegistry;
 import com.assettracker.backend.graph.DroneNode;
 import com.assettracker.backend.graph.GraphService;
@@ -26,8 +27,8 @@ class AgentOrchestrationServiceTest {
     private final GraphService graph = Mockito.mock(GraphService.class);
     private final ObjectMapper mapper = new ObjectMapper();
     private final ToolRegistry registry = new ToolRegistry(graph, new FormationService(), mapper);
-    private final AgentOrchestrationService orchestrator =
-        new AgentOrchestrationService(new StubLlmClient(mapper), registry, mapper);
+    private final AgentOrchestrationService orchestrator = new AgentOrchestrationService(
+        new StubLlmClient(mapper), registry, new PlanExpander(new FormationService()), mapper);
 
     @Test
     void twoPhaseSwarmPlanHasFormUpThenAdvance() {

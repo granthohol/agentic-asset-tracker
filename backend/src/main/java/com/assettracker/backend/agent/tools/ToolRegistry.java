@@ -8,8 +8,10 @@ import java.util.Map;
 
 import org.springframework.stereotype.Component;
 
+import com.assettracker.backend.agent.formation.FormationPreview;
 import com.assettracker.backend.agent.formation.FormationService;
 import com.assettracker.backend.agent.formation.FormationType;
+import com.assettracker.backend.graph.DroneNode;
 import com.assettracker.backend.graph.GraphService;
 import com.assettracker.backend.model.DroneStatus;
 import com.fasterxml.jackson.core.JsonProcessingException;
@@ -63,9 +65,12 @@ public class ToolRegistry {
 
         register(new Tool(
             "list_drones",
-            "List every drone known to the graph (id, position, batteryLevel, status, currentWaypoint). Prefer a narrower tool when you can; this can be large.",
+            "List every drone as a COMPACT COLUMNAR table to save tokens: "
+                + "{\"fields\":[\"id\",\"lat\",\"lng\"],\"rows\":[[\"drone-000\",43.07311,-89.40121], ...]}. "
+                + "Only id + position (lat/lng); for battery or status use get_drones_by_status / "
+                + "get_low_battery_drones. Can be large.",
             objectSchema(props()),
-            args -> mapper.valueToTree(graph.listDrones())
+            args -> dronesColumnar(graph.listDrones())
         ));
 
         register(new Tool(
@@ -149,7 +154,7 @@ public class ToolRegistry {
             "Compute concrete target lat/lng for each drone in a formation around a center. "
                 + "Optional facingLatitude/facingLongitude rotate the formation so WEDGE/LINE point "
                 + "at that location (RING is unchanged visually). "
-                + "Returns slots[{index, droneId, targetLat, targetLng}]. "
+                + "Returns slots[{droneId, targetLat, targetLng}]. "
                 + "Emit setWaypoint per slot (FORM_UP then ADVANCE for two-phase swarms). "
                 + "Does not move drones — planning only.",
             objectSchema(
@@ -164,7 +169,7 @@ public class ToolRegistry {
                 ),
                 "type", "centerLatitude", "centerLongitude", "droneIds"
             ),
-            args -> mapper.valueToTree(formations.preview(
+            args -> previewJson(formations.preview(
                 FormationType.parse(requireString(args, "type")),
                 requireDouble(args, "centerLatitude"),
                 requireDouble(args, "centerLongitude"),
@@ -173,6 +178,27 @@ public class ToolRegistry {
                 optDouble(args, "facingLatitude"),
                 optDouble(args, "facingLongitude")
             ))
+        ));
+
+        register(new Tool(
+            "preview_two_phase",
+            "Plan a two-phase swarm approach in ONE call. Given a formation type, ordered droneIds, "
+                + "and the AOI (aoiLat/aoiLng), returns COMPACT centers only: a FORM_UP standoff center "
+                + "near the leader (first droneId) and the ADVANCE center (the AOI). Emit two "
+                + "applyFormation actions from these centers (FORM_UP then ADVANCE) — no per-slot "
+                + "coordinates needed. Returns {formationType, droneCount, formUpCenter{lat,lng}, "
+                + "advanceCenter{lat,lng}}.",
+            objectSchema(
+                props(
+                    "formationType", enumField("Formation type from list_formations.", "RING", "WEDGE", "LINE"),
+                    "droneIds", twoPhaseDroneIdsField(),
+                    "aoiLat", field("number", "Area-of-interest latitude (the objective / disturbance)."),
+                    "aoiLng", field("number", "Area-of-interest longitude."),
+                    "spacingMeters", field("number", "Optional spacing between slots in meters (default ~200).")
+                ),
+                "formationType", "droneIds", "aoiLat", "aoiLng"
+            ),
+            this::previewTwoPhase
         ));
 
         // --- persistent map entities (tracks / waypoints / zones) -----------
@@ -270,6 +296,85 @@ public class ToolRegistry {
             arr.add(spec);
         }
         return arr;
+    }
+
+    // --- compact tool-result builders (token diet) ---------------------------
+
+    /** Round a coordinate to 5 decimals (~1.1 m) to trim tokens in tool results. */
+    private static double round5(double v) {
+        return Math.round(v * 1e5) / 1e5;
+    }
+
+    /**
+     * list_drones as a compact columnar table ({@code {fields, rows}}) with only id/lat/lng.
+     * Repeating 50 objects with full field names is the single biggest resent-every-turn payload;
+     * columnar drops the repeated keys and battery/status the planner doesn't need for geometry.
+     */
+    private ObjectNode dronesColumnar(List<DroneNode> drones) {
+        ObjectNode out = mapper.createObjectNode();
+        ArrayNode fields = out.putArray("fields");
+        fields.add("id");
+        fields.add("lat");
+        fields.add("lng");
+        ArrayNode rows = out.putArray("rows");
+        for (DroneNode d : drones) {
+            ArrayNode row = rows.addArray();
+            row.add(d.id());
+            row.add(round5(d.latitude()));
+            row.add(round5(d.longitude()));
+        }
+        return out;
+    }
+
+    /** Serialize a formation preview with coordinates rounded to 5 decimals. */
+    private JsonNode previewJson(FormationPreview preview) {
+        ObjectNode node = (ObjectNode) mapper.valueToTree(preview);
+        node.put("centerLat", round5(node.path("centerLat").asDouble()));
+        node.put("centerLng", round5(node.path("centerLng").asDouble()));
+        JsonNode slots = node.get("slots");
+        if (slots != null && slots.isArray()) {
+            for (JsonNode s : slots) {
+                ObjectNode so = (ObjectNode) s;
+                so.put("targetLat", round5(so.path("targetLat").asDouble()));
+                so.put("targetLng", round5(so.path("targetLng").asDouble()));
+            }
+        }
+        return node;
+    }
+
+    /** Compact two-phase swarm preview: both formation centers, no per-slot coordinates. */
+    private JsonNode previewTwoPhase(JsonNode args) {
+        FormationType type = FormationType.parse(requireString(args, "formationType"));
+        List<String> droneIds = requireStringList(args, "droneIds");
+        double aoiLat = requireDouble(args, "aoiLat");
+        double aoiLng = requireDouble(args, "aoiLng");
+
+        // Standoff is measured from the leader (first id); resolve its live position from the
+        // graph. If unknown, standoffCenter falls back to "south of the AOI".
+        String leaderId = droneIds.get(0);
+        var leader = graph.getDroneById(leaderId);
+        double leaderLat = leader.map(d -> d.drone().latitude()).orElse(aoiLat);
+        double leaderLng = leader.map(d -> d.drone().longitude()).orElse(aoiLng);
+        double[] formUp = FormationService.standoffCenter(
+            aoiLat, aoiLng, leaderLat, leaderLng, FormationService.DEFAULT_STANDOFF_METERS);
+        int count = Math.min(droneIds.size(), FormationService.MAX_FORMATION_DRONES);
+
+        ObjectNode out = mapper.createObjectNode();
+        out.put("formationType", type.name());
+        out.put("droneCount", count);
+        ObjectNode formUpCenter = out.putObject("formUpCenter");
+        formUpCenter.put("lat", round5(formUp[0]));
+        formUpCenter.put("lng", round5(formUp[1]));
+        ObjectNode advanceCenter = out.putObject("advanceCenter");
+        advanceCenter.put("lat", round5(aoiLat));
+        advanceCenter.put("lng", round5(aoiLng));
+        return out;
+    }
+
+    private ObjectNode twoPhaseDroneIdsField() {
+        ObjectNode f = field("array", "Ordered drone ids for the swarm (leader first), from list_drones.");
+        f.set("items", field("string", "A drone id, e.g. 'drone-000'."));
+        return f;
     }
 
     // --- JSON Schema helpers -------------------------------------------------

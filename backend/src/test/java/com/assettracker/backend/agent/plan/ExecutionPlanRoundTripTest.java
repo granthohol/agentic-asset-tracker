@@ -107,6 +107,40 @@ class ExecutionPlanRoundTripTest {
         assertThat(reserialized).contains("\"op\":\"removeZone\"");
     }
 
+    private static final String FORMATION_PLAN_JSON = """
+        {
+          "planId": "plan-f",
+          "rationale": "WEDGE swarm: form up then advance.",
+          "actions": [
+            { "op": "applyFormation", "formationType": "WEDGE", "centerLat": 39.032, "centerLng": -77.18,
+              "droneIds": ["drone-000","drone-001"], "mission_type": "FORM_UP",
+              "facingLat": 39.05, "facingLng": -77.18 }
+          ]
+        }
+        """;
+
+    @Test
+    void parsesAndRoundTripsApplyFormation() throws Exception {
+        ExecutionPlan plan = mapper.readValue(FORMATION_PLAN_JSON, ExecutionPlan.class);
+        assertThat(plan.actions()).hasSize(1);
+        assertThat(plan.actions().get(0)).isInstanceOf(PlanAction.ApplyFormation.class);
+
+        PlanAction.ApplyFormation af = (PlanAction.ApplyFormation) plan.actions().get(0);
+        assertThat(af.formationType())
+            .isEqualTo(com.assettracker.backend.agent.formation.FormationType.WEDGE);
+        assertThat(af.missionType()).isEqualTo("FORM_UP"); // mission_type -> missionType mapping
+        assertThat(af.droneIds()).containsExactly("drone-000", "drone-001");
+        assertThat(af.centerLat()).isEqualTo(39.032);
+
+        String reserialized = mapper.writeValueAsString(plan);
+        assertThat(reserialized).contains("\"op\":\"applyFormation\"");
+        assertThat(reserialized).contains("\"mission_type\":\"FORM_UP\"");
+        assertThat(reserialized).doesNotContain("spacingMeters"); // NON_NULL: absent optional stays absent
+
+        ExecutionPlan second = mapper.readValue(reserialized, ExecutionPlan.class);
+        assertThat(second).isEqualTo(plan);
+    }
+
     @Test
     void unknownOpIsRejected() {
         String bad = """

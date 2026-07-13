@@ -126,7 +126,6 @@ public class FormationService {
         for (int i = 0; i < count; i++) {
             double[] off = offsets.get(i);
             slots.add(new FormationSlot(
-                i,
                 selected.get(i),
                 centerLat + off[0],
                 centerLng + off[1]

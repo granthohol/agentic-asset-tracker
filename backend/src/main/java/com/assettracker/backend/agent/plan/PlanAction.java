@@ -2,6 +2,7 @@ package com.assettracker.backend.agent.plan;
 
 import java.util.List;
 
+import com.assettracker.backend.agent.formation.FormationType;
 import com.assettracker.backend.graph.Affiliation;
 import com.assettracker.backend.graph.TrackDomain;
 import com.assettracker.backend.graph.ZoneShape;
@@ -35,6 +36,7 @@ import com.fasterxml.jackson.annotation.JsonTypeInfo;
     @JsonSubTypes.Type(value = PlanAction.RemoveDroneAssignment.class, name = "removeDroneAssignment"),
     @JsonSubTypes.Type(value = PlanAction.RemoveSquadronFromObjective.class, name = "removeSquadronFromObjective"),
     @JsonSubTypes.Type(value = PlanAction.SetWaypoint.class, name = "setWaypoint"),
+    @JsonSubTypes.Type(value = PlanAction.ApplyFormation.class, name = "applyFormation"),
     @JsonSubTypes.Type(value = PlanAction.ClearWaypoint.class, name = "clearWaypoint"),
     @JsonSubTypes.Type(value = PlanAction.UpsertTrack.class, name = "upsertTrack"),
     @JsonSubTypes.Type(value = PlanAction.UpsertWaypoint.class, name = "upsertWaypoint"),
@@ -109,6 +111,26 @@ public sealed interface PlanAction {
         double targetLat,
         double targetLng,
         @JsonProperty("mission_type") String missionType
+    ) implements PlanAction {}
+
+    /**
+     * Compact swarm macro: place {@code droneIds} into a {@code formationType} formation around
+     * ({@code centerLat}, {@code centerLng}), optionally facing ({@code facingLat},
+     * {@code facingLng}). The backend <b>expands</b> this into one {@link SetWaypoint} per drone
+     * (carrying {@code missionType}) before the plan leaves the orchestrator or reaches the
+     * executor — the frontend and executor only ever see the resulting {@code setWaypoint}s. Lets
+     * the model emit ~2 actions for a two-phase swarm instead of ~100. See docs/PLAN.md.
+     */
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    record ApplyFormation(
+        FormationType formationType,
+        double centerLat,
+        double centerLng,
+        List<String> droneIds,
+        @JsonProperty("mission_type") String missionType,
+        Double spacingMeters,
+        Double facingLat,
+        Double facingLng
     ) implements PlanAction {}
 
     /** Clear a drone's current waypoint (it resumes free movement). */
