@@ -24,7 +24,7 @@ class StubLlmClientSelectionTest {
         "drone-000", "drone-001", "drone-002", "drone-003", "drone-004"
     );
 
-    /** A request whose tool history already contains a list_drones result (turn 2+). */
+    /** Turn 2+ request with list_drones already in history. */
     private LlmRequest requestWith(String userCommand, LlmMessage... toolMessages) {
         java.util.List<LlmMessage> messages = new java.util.ArrayList<>();
         messages.add(LlmMessage.user(userCommand));
@@ -78,7 +78,7 @@ class StubLlmClientSelectionTest {
             .containsExactlyElementsOf(fleet);
     }
 
-    // --- map-entity heuristics -------------------------------------------------
+    // Map entity heuristics
 
     @Test
     void detectsExplicitLatLng() {

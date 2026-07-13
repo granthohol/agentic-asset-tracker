@@ -1,7 +1,5 @@
-// Mirrors the backend ExecutionPlan v2 contract (docs/PLAN.md). The discriminated union
-// on `op` matches the Java sealed PlanAction; field names match the wire JSON exactly
-// (note setWaypoint uses snake_case `mission_type`), so a plan from /api/plan can be sent
-// straight back to /api/execute-plan with JSON.stringify and no transformation.
+// Matches backend ExecutionPlan v2 (docs/PLAN.md). Same JSON from /api/plan goes to /api/execute-plan.
+// setWaypoint uses snake_case mission_type on the wire.
 
 export interface UpsertSquadron {
     op: "upsertSquadron";

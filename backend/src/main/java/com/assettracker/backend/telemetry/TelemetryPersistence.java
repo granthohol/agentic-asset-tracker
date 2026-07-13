@@ -19,30 +19,19 @@ import com.assettracker.backend.graph.GraphWriter;
 import com.assettracker.backend.model.Drone;
 
 /**
- * Phase 4: a bounded buffer that moves telemetry persistence (SQLite shadow log + Neo4j
- * projection) off the Kafka listener thread. At 1000 drones x 20 Hz, writing per event
- * synchronously in {@link TelemetryConsumer} stalls the listener and backs up the whole
- * pipeline. Instead the consumer {@link #enqueue}s events and a scheduled tick drains and
- * batch-writes them:
- *
- * <ul>
- *   <li>SQLite: one connection + one transaction per flush (JDBC batch) preserves the full
- *       event stream for replay.</li>
- *   <li>Neo4j: only the latest position per drone matters for the projection, so events are
- *       coalesced to newest-per-drone and upserted in a single UNWIND.</li>
- * </ul>
- *
- * Under sustained overload the bounded queue sheds the oldest events (best-effort dev
- * simulator) rather than growing without bound; drops are counted and logged.
+ * Buffers telemetry for async persistence (SQLite shadow log + Neo4j).
+ * At 1000 drones x 20 Hz, writing per event in the listener stalls the pipeline.
+ * Flush tick: batch SQLite append, coalesce to newest-per-drone for Neo4j.
+ * Bounded queue drops oldest events under overload rather than growing forever.
  */
 @Component
 public class TelemetryPersistence {
 
     private static final Logger log = LoggerFactory.getLogger(TelemetryPersistence.class);
 
-    /** Cap so a stalled DB cannot let the queue grow unbounded. ~10s of 1000x20Hz. */
+    /** ~10s buffer at 1000x20Hz. Stalled DB can't grow the queue forever. */
     private static final int QUEUE_CAPACITY = 200_000;
-    /** Max events pulled per flush so one tick's work stays bounded. */
+    /** Max events per flush so one tick stays bounded. */
     private static final int MAX_DRAIN = 100_000;
 
     private final BlockingQueue<TelemetryEvent> queue = new ArrayBlockingQueue<>(QUEUE_CAPACITY);
@@ -65,10 +54,10 @@ public class TelemetryPersistence {
         this.graphMapper = graphMapper;
     }
 
-    /** Non-blocking hand-off from the listener thread. Sheds oldest on overload. */
+    /** Non-blocking handoff from listener. Drops oldest on overload. */
     public void enqueue(TelemetryEvent event) {
         while (!queue.offer(event)) {
-            queue.poll();                       // drop the oldest to make room
+            queue.poll();                       // make room by dropping oldest
             droppedSinceLastLog.incrementAndGet();
         }
     }
@@ -85,16 +74,14 @@ public class TelemetryPersistence {
             return;
         }
 
-        // SQLite shadow log: keep the full ordered stream.
+        // SQLite: keep full ordered stream.
         try {
             eventLog.appendBatch(batch);
         } catch (Exception e) {
             log.warn("SQLite batch append failed ({} events): {}", batch.size(), e.getMessage());
         }
 
-        // Neo4j projection: only the newest position per drone is meaningful. Iterating in
-        // drain order and overwriting yields the latest because per-drone ordering is
-        // preserved (keyed partition + single listener thread enqueues in order).
+        // Neo4j: only newest position per drone matters. Drain order preserves per-drone ordering.
         Map<String, DroneNode> newestByDrone = new LinkedHashMap<>();
         for (TelemetryEvent event : batch) {
             Drone drone = eventMapper.mapToDrone(event);

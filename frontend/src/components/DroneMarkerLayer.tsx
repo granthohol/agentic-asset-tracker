@@ -19,13 +19,9 @@ interface MarkerEntry {
     mission: MissionVisualStatus;
 }
 
-/**
- * Phase 4 render loop: draw the fleet imperatively so 1,000 markers at 20 Hz never touch
- * React reconciliation. A single requestAnimationFrame tick reads the latest drone
- * snapshot from the store, creating each L.Marker once and calling setLatLng per frame
- * (and setIcon only when the mission color actually changes). Mission context is read
- * through refs so prop changes don't tear down and rebuild the loop.
- */
+// Imperative marker loop: 1k drones at 20 Hz without React reconciliation.
+// rAF reads the store, setLatLng each frame, setIcon only when mission color changes.
+// Mission props via refs so the loop doesn't restart on every render.
 export default function DroneMarkerLayer({
     pendingPlan,
     acceptedRoutes,
@@ -69,7 +65,7 @@ export default function DroneMarkerLayer({
                 }
             });
 
-            // Drop markers for drones that disappeared from the feed.
+            // Drone dropped off the feed.
             markers.forEach((entry, id) => {
                 if (!seen.has(id)) {
                     layer.removeLayer(entry.marker);

@@ -12,12 +12,7 @@ const TOOLS: ToolDef[] = [
     { kind: "zone", label: "Zone" },
 ];
 
-/**
- * Floating map toolbar for manual entity placement. Arming a kind puts the map
- * into click-to-place mode; clicking the armed tool again (or pressing Escape)
- * disarms it back to select/inspect mode. Pure HTML overlay (no Leaflet context)
- * driven by the entity UI store.
- */
+// Floating toolbar: arm a tool to click-to-place, Escape to disarm.
 export default function EntityToolbar() {
     const activeTool = useEntityUiStore((s) => s.activeTool);
     const setTool = useEntityUiStore((s) => s.setTool);

@@ -17,17 +17,14 @@ import { missionVisualStatus, droneMissionInfo } from '../utils/missionStatus'
 
 const WEBSOCKET_URL = "ws://localhost:8080/ws/drones";
 
-// These overlays take no props and read their own stores. Memoizing them stops the 20 Hz
-// telemetry batch re-renders of DroneMap from cascading into them.
+// memo'd so DroneMap's ~20 Hz re-renders don't hit these.
 const EntityLayerMemo = memo(EntityLayer);
 const EntityPlacementMemo = memo(EntityPlacement);
 const EntityCreateFormMemo = memo(EntityCreateForm);
 const EntityInspectorMemo = memo(EntityInspector);
 
-// The edge glides in and snaps to the exact target on the final sub-step (producer.py), so an
-// arrived drone reports distance ~0. A tight epsilon keeps ADVANCE completion / overlay-clear
-// (and the CLEAR_WAYPOINT that resumes roaming) from firing while drones are still ~200 m out.
-// Keep in sync with PlanExecutor.ARRIVAL_DEG.
+// Edge snaps to target on the last sub-step, so arrived drones read ~0 distance.
+// Keep tight so ADVANCE completion doesn't fire ~200m early. Sync with PlanExecutor.ARRIVAL_DEG.
 const ARRIVAL_DEG = 0.0002;
 
 function distanceDegrees(
@@ -39,7 +36,7 @@ function distanceDegrees(
     return Math.hypot(dlat, dlng);
 }
 
-/** Leaflet needs invalidateSize when the map sits in a flex pane instead of full viewport. */
+// Leaflet needs invalidateSize when the map sits in a flex pane.
 function MapResizeFix() {
     const map = useMap();
     useEffect(() => {
@@ -68,14 +65,11 @@ export default function DroneMap({
     onRoutesCompleted,
 }: DroneMapProps) {
     const [, setConnectionStatus] = useState<'Connecting' | 'Open' | 'Closed' | 'Error'>('Connecting');
-    // Live fleet lives in the Zustand store; the imperative marker layer reads it via
-    // getState() in rAF. Lightweight consumers here (arrival detection, overlays,
-    // inspector) subscribe for their occasional updates.
+    // Fleet in Zustand; marker layer reads getState() in rAF. These subscribe for overlays/arrival.
     const drones = useDroneStore((s) => s.drones);
     const [selectedId, setSelectedId] = useState<string | null>(null);
 
-    // Clear overlays on arrival. FORM_UP/HOLD loiter — treat "all form-up drones arrived"
-    // as phase-complete so App can swap in ADVANCE routes. ADVANCE clears per-route.
+    // FORM_UP/HOLD loiter: when all form-up drones arrive, App swaps in ADVANCE routes.
     useEffect(() => {
         if (acceptedRoutes.length === 0 || drones.size === 0) return;
 
@@ -109,7 +103,7 @@ export default function DroneMap({
     }, [drones, acceptedRoutes, onRoutesCompleted]);
 
     useEffect(() => {
-        // Reconnect-with-backoff state, scoped to this effect run.
+        // Reconnect state for this mount.
         let cancelled = false;
         let ws: WebSocket | null = null;
         let reconnectAttempt = 0;
@@ -136,13 +130,13 @@ export default function DroneMap({
             if (cancelled) return;
 
             ws = new WebSocket(WEBSOCKET_URL);
-            // Phase 4: frames are binary protobuf (proto/telemetry.proto), not JSON text.
+            // Binary protobuf, not JSON.
             ws.binaryType = 'arraybuffer';
 
             ws.onopen = () => {
                 console.log('WebSocket Connection Established');
                 setConnectionStatus('Open');
-                reconnectAttempt = 0; // healthy connection resets backoff
+                reconnectAttempt = 0;
             };
 
             ws.onmessage = (event: MessageEvent) => {
@@ -168,26 +162,24 @@ export default function DroneMap({
             ws.onerror = (error: Event) => {
                 console.error('WebSocket encountered an error', error);
                 setConnectionStatus('Error');
-                // onclose fires after onerror in browsers; reconnect is scheduled there.
+                // onclose runs after onerror; reconnect happens there.
             };
         };
 
-        // actual starting point
         connect();
 
         return () => {
-            console.log('Component unmounting, tearing down WebSocket...');
             cancelled = true;
             if (reconnectTimer !== null) {
                 window.clearTimeout(reconnectTimer);
                 reconnectTimer = null;
             }
             if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
-                ws.close(); // Sends the TCP FIN packet to your Java server
+                ws.close();
             }
         };
 
-    }, []); // [] -> runs once on mount, never again
+    }, []);
 
     const selectedDrone = selectedId ? drones.get(selectedId) : undefined;
     const selectedInfo = selectedDrone

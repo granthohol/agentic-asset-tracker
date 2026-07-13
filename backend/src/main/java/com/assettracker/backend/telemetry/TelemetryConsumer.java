@@ -23,10 +23,8 @@ public class TelemetryConsumer {
     }
 
     /**
-     * Phase 4: the hot path stays cheap and non-blocking. Update the in-memory map (the
-     * live source of truth), mark the drone dirty for the next batched WS tick, and hand
-     * the raw event to the persistence buffer. SQLite + Neo4j writes happen on a separate
-     * scheduled flush so this listener never blocks on I/O.
+     * Hot path: update in-memory map, mark dirty for WS, buffer for async persistence.
+     * SQLite + Neo4j writes happen on a scheduled flush so this never blocks on I/O.
      */
     @KafkaListener(
         topics = "drone.telemetry.v1"

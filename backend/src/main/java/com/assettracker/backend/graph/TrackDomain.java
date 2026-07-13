@@ -1,6 +1,6 @@
 package com.assettracker.backend.graph;
 
-/** Operating domain of a tracked contact (see {@link TrackNode}). */
+/** Air or ground. */
 public enum TrackDomain {
     AERIAL,
     GROUND

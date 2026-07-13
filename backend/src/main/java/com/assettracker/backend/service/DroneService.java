@@ -11,10 +11,10 @@ import java.util.concurrent.ConcurrentHashMap;
 @Service
 public class DroneService {
     
-    private final ConcurrentHashMap<String, Drone> droneMap = new ConcurrentHashMap<>();  // thread-safe map of droneId -> Drone object
+    private final ConcurrentHashMap<String, Drone> droneMap = new ConcurrentHashMap<>();  // droneId -> latest state
 
     public void updateDroneMap(Drone drone) {
-        droneMap.put(drone.id(), drone);  // put the drone into the map; overwrite the existing drone if it already exists
+        droneMap.put(drone.id(), drone);
     }
 
     public List<Drone> getAllDrones() {
@@ -22,12 +22,11 @@ public class DroneService {
         droneMap.forEach((id, drone) -> {
             drones.add(drone);
         });
-        // sort the drones by id
         drones.sort(Comparator.comparing(Drone::id));
         return drones;
     }
 
-    /** Live telemetry snapshot for one drone, or null if unknown. */
+    /** Live telemetry for one drone, or null if unknown. */
     public Drone getDrone(String droneId) {
         return droneMap.get(droneId);
     }

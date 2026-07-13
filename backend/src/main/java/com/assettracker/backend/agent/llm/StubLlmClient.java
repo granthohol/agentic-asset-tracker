@@ -24,17 +24,8 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
 /**
- * Offline {@link LlmClient} that mimics a real provider's tool-use loop.
- *
- * <p>Two-phase swarm:
- * <ol>
- *   <li>list_squadrons / list_drones / list_formations / list_* entities</li>
- *   <li>preview_two_phase (one call → compact FORM_UP + ADVANCE centers)</li>
- *   <li>ExecutionPlan: objective + two {@code applyFormation} macros (FORM_UP then ADVANCE)</li>
- * </ol>
- *
- * <p>The orchestrator pre-expands each {@code applyFormation} into per-drone {@code setWaypoint}s,
- * so the offline path still exercises the executor's FORM_UP → ADVANCE gate.
+ * Offline LlmClient that fakes the tool-use loop for dev/tests.
+ * Turn 1: list tools. Turn 2: preview_two_phase. Turn 3: plan with applyFormation macros.
  */
 @Component
 @ConditionalOnProperty(name = "llm.provider", havingValue = "stub", matchIfMissing = true)
@@ -45,7 +36,7 @@ public class StubLlmClient implements LlmClient {
     private static final Pattern LAT_LNG = Pattern.compile(
         "(?i)(?:at\\s+)?(-?\\d+(?:\\.\\d+)?)\\s*,\\s*(-?\\d+(?:\\.\\d+)?)"
     );
-    /** Explicit ids in the prompt, e.g. drone-000 or drone-7. */
+    /** Explicit drone ids in the prompt, e.g. drone-000 or drone-7. */
     private static final Pattern DRONE_ID = Pattern.compile("(?i)\\bdrone-(\\d+)\\b");
     /** Count phrases: "5 drones", "with 3 drones", "swarm of 4" (drones optional after swarm of). */
     private static final Pattern DRONE_COUNT = Pattern.compile(
@@ -89,8 +80,7 @@ public class StubLlmClient implements LlmClient {
 
         String userCommand = firstUserText(request);
 
-        // Map-entity intents (create/remove tracks, waypoints, zones) short-circuit the
-        // swarm path — they need no formation preview.
+        // Map entity create/remove skips the swarm path entirely.
         ExecutionPlan entityPlan = tryEntityPlan(userCommand, request);
         if (entityPlan != null) {
             return end(entityPlan);
@@ -102,13 +92,13 @@ public class StubLlmClient implements LlmClient {
         FormationType type = inferFormationType(userCommand);
 
         if (droneIds.isEmpty()) {
-            // No drones to move: objective-only plan (no formation macro).
+            // No drones: objective-only plan.
             ExecutionPlan plan = buildStubPlan(
                 firstIdFromTool(request, "list_squadrons"), userCommand, aoi, type, droneIds, null, null);
             return end(plan);
         }
 
-        // Turn 2: a single compact two-phase preview resolves both formation centers.
+        // Turn 2: one preview_two_phase call for both centers.
         if (twoPhaseCount == 0) {
             return LlmResponse.toolUse(
                 "Previewing " + type + " two-phase approach for " + droneIds.size() + " drone(s).",
@@ -120,8 +110,7 @@ public class StubLlmClient implements LlmClient {
             );
         }
 
-        // Turn 3: emit a plan with two applyFormation macros from the summary centers.
-        // The orchestrator expands these into per-drone FORM_UP/ADVANCE setWaypoints.
+        // Turn 3: plan with two applyFormation macros. Orchestrator expands to setWaypoints.
         JsonNode summary = allToolContents(request, "preview_two_phase").get(0);
         double[] formUp = centerFromSummary(summary, "formUpCenter", new double[] { aoi[0] - 0.018, aoi[1] });
         double[] advance = centerFromSummary(summary, "advanceCenter", aoi);
@@ -150,7 +139,7 @@ public class StubLlmClient implements LlmClient {
         return args;
     }
 
-    /** Read a {lat,lng} center from a preview_two_phase summary, falling back if absent. */
+    /** Read {lat,lng} from preview_two_phase summary, or use fallback. */
     private static double[] centerFromSummary(JsonNode summary, String key, double[] fallback) {
         JsonNode c = summary == null ? null : summary.get(key);
         if (c != null && c.hasNonNull("lat") && c.hasNonNull("lng")) {
@@ -159,11 +148,7 @@ public class StubLlmClient implements LlmClient {
         return fallback;
     }
 
-    /**
-     * Build the stub plan: an objective + squadron deploy, plus (when drones are selected) two
-     * compact {@code applyFormation} macros. The orchestrator expands each macro into per-drone
-     * FORM_UP/ADVANCE setWaypoints before the plan leaves the server.
-     */
+    /** Stub plan: objective + deploy, plus two applyFormation macros when drones are selected. */
     private ExecutionPlan buildStubPlan(
         String squadronId,
         String userCommand,
@@ -190,11 +175,11 @@ public class StubLlmClient implements LlmClient {
 
         String cmd = userCommand == null ? "(no command)" : userCommand;
         String rationale;
-        // Inline (not a boolean var) so null-analysis narrows the fields inside the else branch.
+        // Inline check so null-analysis narrows formUpCenter/advanceCenter in the else branch.
         if (droneIds == null || droneIds.isEmpty() || formUpCenter == null || advanceCenter == null) {
             rationale = "Stub plan for: \"" + cmd + "\". Creates an objective and deploys assets to it.";
         } else {
-            // FORM_UP faces the AOI; ADVANCE keeps the approach heading (points beyond the AOI).
+            // FORM_UP faces the AOI; ADVANCE keeps the approach heading.
             double faceLat = aoiLat + (aoiLat - formUpCenter[0]);
             double faceLng = aoiLng + (aoiLng - formUpCenter[1]);
             actions.add(new PlanAction.ApplyFormation(
@@ -222,19 +207,16 @@ public class StubLlmClient implements LlmClient {
         return FormationType.RING;
     }
 
-    // --- Map entity heuristics (offline analogue of an LLM's create/reference) ------
+    // Map entity heuristics (offline stand-in for real LLM intent parsing)
 
-    /**
-     * Detect a create/remove intent for a persistent map entity. Returns a ready plan, or
-     * {@code null} when the prompt is not an entity command (so the swarm path is unchanged).
-     */
+    /** Detect create/remove map entity intent. Returns null if this is a swarm command. */
     ExecutionPlan tryEntityPlan(String userCommand, LlmRequest request) {
         if (userCommand == null || userCommand.isBlank()) {
             return null;
         }
         String lower = userCommand.toLowerCase(Locale.ROOT);
 
-        // Removal first: a verb plus an entity whose name is referenced in the prompt.
+        // Removal: verb + entity name referenced in the prompt.
         if (REMOVE_VERB.matcher(lower).find()) {
             PlanAction removal = resolveRemoval(lower, request);
             if (removal != null) {
@@ -304,10 +286,7 @@ public class StubLlmClient implements LlmClient {
         return null;
     }
 
-    /**
-     * Resolve the AOI: explicit {@code lat,lng} wins; otherwise fall back to a named zone
-     * center (then a named waypoint) found in tool results; else the stub default.
-     */
+    /** AOI: explicit lat,lng wins, else named zone/waypoint from tool results, else default. */
     private double[] resolveAoi(String userCommand, LlmRequest request) {
         if (hasExplicitLatLng(userCommand)) {
             return parseLatLng(userCommand);
@@ -459,7 +438,7 @@ public class StubLlmClient implements LlmClient {
         return out;
     }
 
-    /** All drone ids from list_drones (order preserved). Parses the columnar {fields, rows} shape. */
+    /** All drone ids from list_drones. Handles columnar {fields, rows} and legacy array shape. */
     private List<String> collectAllDroneIds(LlmRequest request) {
         List<String> ids = new ArrayList<>();
         for (JsonNode content : allToolContents(request, "list_drones")) {
@@ -469,7 +448,7 @@ public class StubLlmClient implements LlmClient {
     }
 
     private static void addDroneIds(JsonNode content, List<String> ids) {
-        // Legacy object-array shape ([{id, ...}, ...]).
+        // Legacy shape: [{id, ...}, ...]
         if (content.isArray()) {
             for (JsonNode element : content) {
                 JsonNode id = element.get("id");
@@ -479,7 +458,7 @@ public class StubLlmClient implements LlmClient {
             }
             return;
         }
-        // Compact columnar shape ({"fields":["id","lat","lng"], "rows":[[...], ...]}).
+        // Columnar shape: {fields, rows}
         JsonNode fields = content.get("fields");
         JsonNode rows = content.get("rows");
         if (fields == null || !fields.isArray() || rows == null || !rows.isArray()) {
@@ -505,14 +484,7 @@ public class StubLlmClient implements LlmClient {
         }
     }
 
-    /**
-     * Resolve which drones to use from the prompt:
-     * <ol>
-     *   <li>Explicit ids ({@code drone-000}, …) that exist in {@code available}</li>
-     *   <li>Else a count phrase ({@code 5 drones}, {@code swarm of 3}) → first N available</li>
-     *   <li>Else all available (capped at {@link FormationService#MAX_FORMATION_DRONES})</li>
-     * </ol>
-     */
+    /** Pick drones: explicit ids, then count phrase, then all (capped at MAX_FORMATION_DRONES). */
     static List<String> selectDroneIds(String userCommand, List<String> available) {
         if (available == null || available.isEmpty()) {
             return List.of();
@@ -543,7 +515,7 @@ public class StubLlmClient implements LlmClient {
         }
         Matcher m = DRONE_ID.matcher(userCommand);
         while (m.find()) {
-            // Normalize to drone-NNN (zero-padded to 3 when possible) for matching.
+            // Normalize to drone-NNN for matching.
             String rawNum = m.group(1);
             ids.add("drone-" + rawNum);
             try {
@@ -552,7 +524,7 @@ public class StubLlmClient implements LlmClient {
                 // keep raw form only
             }
         }
-        // Dedup while preserving order of first occurrence of each canonical-ish form.
+        // Dedup, keep first occurrence order.
         List<String> unique = new ArrayList<>();
         for (String id : ids) {
             if (!unique.contains(id)) {

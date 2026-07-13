@@ -2,7 +2,7 @@ import L from "leaflet";
 
 import type { Affiliation, TrackDomain } from "../types/entity";
 
-/** Affiliation drives color; domain drives marker silhouette (aerial diamond / ground square). */
+// Color = affiliation, shape = domain (diamond vs square).
 const AFFILIATION_COLOR: Record<Affiliation, string> = {
     HOSTILE: "#e05858",
     FRIENDLY: "#3aad6e",
@@ -14,7 +14,7 @@ const WAYPOINT_COLOR = "#c7d0da";
 const trackIconCache = new Map<string, L.DivIcon>();
 let waypointIconCacheEntry: L.DivIcon | null = null;
 
-/** Diamond (aerial) or square (ground) contact marker tinted by affiliation. */
+/** Contact marker: diamond (aerial) or square (ground). */
 export function trackIcon(affiliation: Affiliation, domain: TrackDomain): L.DivIcon {
     const key = `${affiliation}-${domain}`;
     const cached = trackIconCache.get(key);
@@ -43,7 +43,7 @@ export function affiliationColor(affiliation: Affiliation): string {
 
 let zoneHandleIconCacheEntry: L.DivIcon | null = null;
 
-/** Draggable handle shown at a selected circle zone's center. */
+/** Drag handle for a selected circle zone. */
 export function zoneHandleIcon(): L.DivIcon {
     if (zoneHandleIconCacheEntry) return zoneHandleIconCacheEntry;
     zoneHandleIconCacheEntry = L.divIcon({
@@ -55,7 +55,7 @@ export function zoneHandleIcon(): L.DivIcon {
     return zoneHandleIconCacheEntry;
 }
 
-/** Small dot marker for a labeled point of interest (label shows on hover). */
+/** POI dot (label on hover). */
 export function waypointIcon(): L.DivIcon {
     if (waypointIconCacheEntry) return waypointIconCacheEntry;
     waypointIconCacheEntry = L.divIcon({

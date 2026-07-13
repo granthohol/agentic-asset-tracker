@@ -12,16 +12,8 @@ import org.springframework.kafka.config.ConcurrentKafkaListenerContainerFactory;
 import org.springframework.kafka.core.DefaultKafkaConsumerFactory;
 
 /**
- * A dedicated listener container factory for the {@code plan.events} topic.
- *
- * <p>The app's default consumer (from {@code application.properties}) uses a
- * {@code JsonDeserializer} bound to {@code TelemetryEvent}, which is wrong for plan
- * envelopes. {@link com.assettracker.backend.execution.PlanExecutor} references this factory
- * by name so it consumes plain JSON <b>strings</b> (which it parses with the Jackson 2 agent
- * mapper), leaving the telemetry listener untouched.
- *
- * <p>{@code auto.offset.reset=earliest}: an approved plan must execute even if the executor
- * joined the group after it was enqueued — we never want to silently drop an approval.
+ * Kafka listener factory for plan.events. Plain string deserializer, not the telemetry JsonDeserializer.
+ * earliest offset reset so we don't miss a plan that was enqueued before we joined.
  */
 @Configuration
 public class KafkaConfig {

@@ -2,7 +2,7 @@ import type { ExecutionPlan } from '../types/plan';
 import type { AcceptedRoute } from '../types/route';
 import type { MissionVisualStatus } from '../components/droneIcons';
 
-/** Mission role used to tint a drone marker (executing > proposed > idle). */
+/** Marker tint: executing beats proposed beats idle. */
 export function missionVisualStatus(
     droneId: string,
     pendingPlan: ExecutionPlan | null,
@@ -26,7 +26,7 @@ export interface DroneMissionInfo {
     waypoint?: { lat: number; lng: number };
 }
 
-/** The active (accepted) or proposed waypoint + mission type for one drone, if any. */
+/** Active or proposed waypoint + mission type for one drone. */
 export function droneMissionInfo(
     droneId: string,
     pendingPlan: ExecutionPlan | null,

@@ -2,10 +2,7 @@ package com.assettracker.backend.agent.llm;
 
 import com.fasterxml.jackson.databind.JsonNode;
 
-/**
- * A request from the model to run one tool. {@code id} correlates this call with the
- * {@link ToolResult} we send back. {@code input} is the JSON arguments object.
- */
+/** One tool the model wants to run. id ties back to the ToolResult we return. */
 public record ToolCall(
     String id,
     String name,

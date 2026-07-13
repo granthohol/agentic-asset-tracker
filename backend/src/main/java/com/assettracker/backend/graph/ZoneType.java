@@ -1,6 +1,6 @@
 package com.assettracker.backend.graph;
 
-/** Semantic type of a {@link ZoneNode}. */
+/** What kind of zone this is. */
 public enum ZoneType {
     RESTRICTED,
     PATROL

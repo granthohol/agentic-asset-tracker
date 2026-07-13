@@ -1,6 +1,6 @@
 import L from "leaflet";
 
-/** Visual mission role on the map (not telemetry battery status). */
+/** Mission role for marker color (not battery status). */
 export type MissionVisualStatus = "idle" | "proposed" | "executing";
 
 const MISSION_COLOR: Record<MissionVisualStatus, string> = {
@@ -11,7 +11,7 @@ const MISSION_COLOR: Record<MissionVisualStatus, string> = {
 
 const iconCache = new Map<MissionVisualStatus, L.DivIcon>();
 
-/** Compact diamond marker tinted by mission involvement. */
+/** Diamond marker, tinted by mission role. */
 export function droneIcon(missionStatus: MissionVisualStatus): L.DivIcon {
     const key = MISSION_COLOR[missionStatus] ? missionStatus : "idle";
     const cached = iconCache.get(key);

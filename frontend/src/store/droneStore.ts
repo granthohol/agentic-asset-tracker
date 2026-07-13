@@ -4,18 +4,14 @@ import type { Drone } from '../types/drone';
 
 interface DroneState {
     drones: Map<string, Drone>;
-    /** Replace the whole fleet from a SNAPSHOT frame (sent on connect/reconnect). */
+    /** Full fleet from a SNAPSHOT frame (connect/reconnect). */
     applySnapshot: (list: Drone[]) => void;
-    /** Merge a coalesced BATCH frame of updates into the fleet. */
+    /** Merge a BATCH frame into the fleet. */
     applyBatch: (list: Drone[]) => void;
 }
 
-/**
- * Phase 4: telemetry lives here, outside React's render path. The WebSocket writes decoded
- * frames straight into this store; the imperative rAF marker layer reads it via
- * {@link useDroneStore.getState} each tick and moves Leaflet markers without re-rendering
- * React. Lightweight overlays (plan lines, inspector, arrival detection) still subscribe.
- */
+// Telemetry lives outside React. WS writes here; the rAF marker layer reads via getState().
+// Overlays/inspector still subscribe normally.
 export const useDroneStore = create<DroneState>((set) => ({
     drones: new Map(),
 

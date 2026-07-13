@@ -37,7 +37,7 @@ function fmtCoord(value: number): string {
     return value.toFixed(5);
 }
 
-/** Representative anchor point for a zone (circle center, else first vertex). */
+/** Zone anchor: circle center, or first polygon vertex. */
 function zoneAnchor(zone: Zone): [number, number] | null {
     if (zone.centerLatitude != null && zone.centerLongitude != null) {
         return [zone.centerLatitude, zone.centerLongitude];
@@ -55,11 +55,7 @@ function zoneVertices(zone: Zone): [number, number][] {
     return out;
 }
 
-/**
- * Inspector for a selected entity: view fields, toggle Edit to change them (PUT),
- * or Delete. Follows the entity anchor until dragged, then pins (mirrors
- * DroneInspector). Reads live entity data from the store by the selection ref.
- */
+// View/edit/delete selected entity. Follows anchor until dragged (same as DroneInspector).
 export default function EntityInspector() {
     const map = useMap();
     const selected = useEntityUiStore((s) => s.selected);
@@ -90,7 +86,7 @@ export default function EntityInspector() {
     const zone: Zone | undefined = kind === "zone" && id ? zones.get(id) : undefined;
     const entity = track ?? waypoint ?? zone;
 
-    // New selection: reset positioning + seed the edit fields from the entity.
+    // New selection: reset position, seed edit fields.
     useEffect(() => {
         setPinned(null);
         setEditing(false);
@@ -107,11 +103,11 @@ export default function EntityInspector() {
             setZoneType(zone.type);
             setRadius(zone.radiusMeters ?? 0);
         }
-        // Only re-seed when the selection identity changes.
+        // Re-seed only when selection identity changes.
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [kind, id]);
 
-    // Re-anchor while following as the map view changes.
+    // Follow anchor on map pan/zoom.
     useEffect(() => {
         if (pinned) return;
         const bump = () => setVersion((v) => v + 1);
@@ -122,7 +118,7 @@ export default function EntityInspector() {
     }, [map, pinned]);
 
     if (!selected) return null;
-    // Selection points at an entity that no longer exists (e.g. deleted elsewhere).
+    // Entity gone (deleted elsewhere).
     if (!entity) return null;
 
     const anchorLatLng: [number, number] | null = track

@@ -93,7 +93,7 @@ class FormationServiceTest {
     @Test
     void wedgeFacesEastWhenFacingPointIsEast() {
         List<String> ids = List.of("a", "b", "c", "d");
-        // Face due east of center → arms should trail west (lower lng than apex).
+        // Facing due east of center, so arms should trail west (lower lng than apex).
         FormationPreview wedge = service.preview(
             FormationType.WEDGE, 39.0, -77.0, ids, null, 39.0, -76.9);
 
@@ -111,7 +111,7 @@ class FormationServiceTest {
     @Test
     void lineIsPerpendicularToFacingDirection() {
         List<String> ids = List.of("a", "b", "c", "d");
-        // Face north → line stays east-west (constant lat).
+        // Facing north, so line stays east-west (constant lat).
         FormationPreview line = service.preview(
             FormationType.LINE, 39.0, -77.0, ids, null, 39.1, -77.0);
         assertThat(line.slots()).allSatisfy(s -> assertThat(s.targetLat()).isEqualTo(39.0));

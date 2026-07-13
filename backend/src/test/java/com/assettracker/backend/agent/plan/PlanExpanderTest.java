@@ -62,7 +62,7 @@ class PlanExpanderTest {
 
         List<PlanAction> out = expander.expand(plan).actions();
 
-        assertThat(out).hasSize(5); // objective + 2 FORM_UP + 2 ADVANCE
+        assertThat(out).hasSize(5); // objective, 2 FORM_UP, 2 ADVANCE
         assertThat(out.get(0)).isEqualTo(objective);
         long formUps = out.stream()
             .filter(a -> a instanceof PlanAction.SetWaypoint sw && "FORM_UP".equals(sw.missionType()))

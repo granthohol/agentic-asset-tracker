@@ -1,17 +1,11 @@
 #!/usr/bin/env python3
 """
-Edge telemetry simulator for Agentic Asset Tracker (Phase 2 + Phase 3)
+Mock edge simulator. Two threads in one process:
 
-Two responsibilities run in one process on two threads:
+- main thread: publishes JSON to Kafka ``drone.telemetry.v1`` (key = droneId)
+- daemon thread: listens on ``drone.commands.v1`` for SET_WAYPOINT / CLEAR_WAYPOINT
 
-1. PRODUCER (main thread): publishes JSON telemetry to Kafka topic
-   ``drone.telemetry.v1`` with record key = droneId. See docs/TELEMETRY.md.
-2. COMMANDS CONSUMER (daemon thread): listens on ``drone.commands.v1`` for
-   ``SET_WAYPOINT`` commands and steers the matching drone toward the target
-   instead of letting it random-walk. See docs/COMMANDS.md.
-
-The two threads share the ``drones`` fleet, so a ``threading.Lock`` guards the
-state the consumer mutates (a drone's current target) and the producer reads.
+Shared ``drones`` state is guarded by a ``threading.Lock``.
 """
 
 from __future__ import annotations
@@ -27,30 +21,27 @@ from typing import Optional
 
 from kafka import KafkaConsumer, KafkaProducer
 
-# Defaults aligned with docs/TELEMETRY.md / docs/COMMANDS.md and local docker-compose
+# Topic/group defaults; see docs/TELEMETRY.md and docs/COMMANDS.md
 DEFAULT_BOOTSTRAP = "localhost:9092"
 DEFAULT_TOPIC = "drone.telemetry.v1"
 DEFAULT_COMMANDS_TOPIC = "drone.commands.v1"
 DEFAULT_COMMANDS_GROUP = "edge-sim-commands"
 DEFAULT_DRONE_COUNT = 50
 
-# Roughly matches Phase 1 map center
+# Map center from Phase 1
 CENTER_LAT = 39.0
 CENTER_LON = -77.2
 
-# Motion model is time-based (degrees per SECOND), not per-tick, so the look is identical
-# whether we publish at 1 Hz or 20 Hz. Roaming drones hold a heading and turn gently for a
-# smooth, curving path instead of jittering in place; commanded drones steer toward a target.
-ROAM_SPEED_DEG_PER_S = 0.004     # ground speed while free-roaming
-STEER_SPEED_DEG_PER_S = 0.0025   # ground speed toward a commanded waypoint (watchable form-up)
-# Heading turns smoothly: we drive an angular *velocity* (turn_rate) that mean-reverts to 0
-# with a little random acceleration, then integrate it into the heading. This yields gentle
-# banking curves instead of the per-tick white-noise wobble a direct random heading gives.
-TURN_NOISE_RAD_PER_S = 0.6       # stddev of random angular acceleration
-TURN_DAMP_PER_S = 0.8            # pulls turn_rate back toward straight-line flight
-MAX_TURN_RATE_RAD_PER_S = 0.5    # clamp so drones can't spin in place
-ROAM_RADIUS_DEG = 0.08           # soft boundary: turn back toward center beyond this
-BATTERY_STEP_HZ = 1.0            # battery random-walk steps per second (rate-independent)
+# Motion is time-based (deg/sec), not per-tick, so 1 Hz and 20 Hz look the same.
+# Roaming drones curve gently; commanded ones steer toward a waypoint.
+ROAM_SPEED_DEG_PER_S = 0.004
+STEER_SPEED_DEG_PER_S = 0.0025
+# Turn rate mean-reverts with random acceleration for smooth arcs, not per-tick wobble.
+TURN_NOISE_RAD_PER_S = 0.6
+TURN_DAMP_PER_S = 0.8
+MAX_TURN_RATE_RAD_PER_S = 0.5
+ROAM_RADIUS_DEG = 0.08  # soft boundary, steer back toward center
+BATTERY_STEP_HZ = 1.0     # drain rate is independent of publish Hz
 
 PUBLISH_FREQ = 1.0
 JITTER_RATIO = 0.2
@@ -62,13 +53,12 @@ class SimulatedDrone:
     longitude: float
     battery_level: int
     seq_num: int
-    # Free-roam heading (radians) and its angular velocity; integrating the (smoothly
-    # drifting) turn_rate into heading gives curved paths without per-tick wobble.
+    # Roam heading + turn rate for curved paths.
     heading: float = 0.0
     turn_rate: float = 0.0
-    # Accumulates elapsed time so battery steps happen at a fixed rate regardless of tick Hz.
+    # Keeps battery drain independent of tick rate.
     battery_accum: float = 0.0
-    # Phase 3: set by an incoming SET_WAYPOINT command; None => free roam.
+    # SET_WAYPOINT target; None means free roam.
     target_lat: Optional[float] = None
     target_lng: Optional[float] = None
     mission_type: Optional[str] = None
@@ -81,8 +71,7 @@ class SimulatedDrone:
         return "ACTIVE"
 
     def step_physics(self, dt: float) -> None:
-        """Advance the drone by ``dt`` seconds. All motion is time-scaled so 1 Hz and
-        20 Hz produce the same ground track."""
+        """Advance by dt seconds. Time-scaled so any publish rate looks the same."""
         if self.target_lat is not None and self.target_lng is not None:
             self._steer_toward_target(dt)
         else:
@@ -90,15 +79,8 @@ class SimulatedDrone:
         self._step_battery(dt)
 
     def _roam(self, dt: float) -> None:
-        """Smooth wandering: keep a heading, turn it gently, and translate along it.
-
-        Because we move a fixed distance *along the current heading* (rather than picking a
-        brand-new random offset every tick), the path is continuous and covers real ground
-        instead of averaging back to the start. A soft boundary re-points the drone toward
-        the map center so the fleet doesn't disperse off-screen.
-        """
-        # Smoothly evolve the turn rate (mean-reverting random acceleration), then integrate
-        # it into the heading. sqrt(dt) on the noise keeps the wander rate-independent.
+        """Wander with a held heading and gentle turns. Soft boundary pulls drones back toward center."""
+        # Evolve turn rate (sqrt(dt) keeps wander rate-independent), integrate into heading.
         self.turn_rate += (
             -TURN_DAMP_PER_S * self.turn_rate * dt
             + random.gauss(0.0, TURN_NOISE_RAD_PER_S) * math.sqrt(dt)
@@ -109,9 +91,8 @@ class SimulatedDrone:
         dlat = CENTER_LAT - self.latitude
         dlng = CENTER_LON - self.longitude
         if math.hypot(dlat, dlng) > ROAM_RADIUS_DEG:
-            # Beyond the soft boundary, ease the heading toward home instead of snapping,
-            # and bleed off the turn rate so the turn-back is smooth too.
-            home = math.atan2(dlat, dlng)  # atan2(north, east)
+            # Past the boundary: ease heading home, bleed off turn rate.
+            home = math.atan2(dlat, dlng)
             diff = (home - self.heading + math.pi) % (2 * math.pi) - math.pi
             self.heading += diff * min(1.0, 2.0 * dt)
             self.turn_rate *= 0.5
@@ -121,25 +102,17 @@ class SimulatedDrone:
         self.latitude += step * math.sin(self.heading)
 
     def _steer_toward_target(self, dt: float) -> None:
-        """Move toward (target_lat, target_lng) at a fixed ground speed.
+        """Steer toward target at fixed speed. On arrival, loiter until CLEAR_WAYPOINT.
 
-        On arrival the drone holds station at the target (loiter) for every mission
-        type. A waypoint is only released by an explicit CLEAR_WAYPOINT (mission
-        cancel), so "arrived" is a stable, detectable condition for both the FORM_UP
-        gate and ADVANCE mission-complete. Previously non-FORM_UP missions cleared the
-        waypoint the instant they touched down and resumed a random walk, which made
-        early arrivers scatter off the objective and turned arrival into a one-tick
-        event the map/executor routinely missed (mission stuck "running").
+        Non-FORM_UP missions used to clear the waypoint on touchdown and random-walk
+        again, which broke arrival detection (missions stuck "running").
         """
         dlat = self.target_lat - self.latitude
         dlng = self.target_lng - self.longitude
         dist = math.hypot(dlat, dlng)
         step = STEER_SPEED_DEG_PER_S * dt
         if dist <= step:
-            # Only the final sub-step (<= one tick of travel) is snapped, so the approach
-            # glides in at the same ground speed instead of teleporting the last stretch.
-            # step_physics keeps calling steer while target_* is set, so the drone holds
-            # station until a new SET_WAYPOINT or a CLEAR_WAYPOINT arrives.
+            # Snap only the last sub-step; drone holds station until cleared.
             self.latitude = self.target_lat
             self.longitude = self.target_lng
         else:
@@ -147,8 +120,7 @@ class SimulatedDrone:
             self.longitude += step * (dlng / dist)
 
     def _step_battery(self, dt: float) -> None:
-        # Gentle battery random walk, biased downward, at ~BATTERY_STEP_HZ regardless of
-        # publish rate (so 20 Hz doesn't drain 20x faster than 1 Hz).
+        # ~1 Hz battery steps regardless of publish rate.
         self.battery_accum += dt
         while self.battery_accum >= 1.0 / BATTERY_STEP_HZ:
             self.battery_accum -= 1.0 / BATTERY_STEP_HZ
@@ -164,7 +136,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--topic", default=DEFAULT_TOPIC, help="Telemetry topic name.")
     p.add_argument("--commands-topic", default=DEFAULT_COMMANDS_TOPIC, help="Command topic to consume (SET_WAYPOINT).")
     p.add_argument("--commands-group", default=DEFAULT_COMMANDS_GROUP, help="Consumer group id for the command listener.")
-    p.add_argument("--no-consumer", action="store_true", help="Disable the command consumer (telemetry-only, Phase 2 behavior).")
+    p.add_argument("--no-consumer", action="store_true", help="Telemetry only, no command consumer.")
     p.add_argument("--drones", type=int, default=DEFAULT_DRONE_COUNT, help="How many drones to simulate.")
     p.add_argument(
         "--interval",
@@ -189,14 +161,14 @@ def make_initial_fleet(n: int) -> list[SimulatedDrone]:
                 latitude=CENTER_LAT + random.uniform(-0.05, 0.05),
                 longitude=CENTER_LON + random.uniform(-0.05,0.05),
                 battery_level=random.randint(40, 100),
-                seq_num=0, # first telemetry instance for each drone
+                seq_num=0,
                 heading=random.uniform(0, 2 * math.pi),
             )
         )
     return drones
 
 def sleep_with_jitter(base_interval: float, jitter_ratio: float) -> None:
-    """Adds randomness"""
+    """Sleep with random jitter."""
     if base_interval <= 0:
         return
 
@@ -210,12 +182,7 @@ def consume_commands(
     args: argparse.Namespace,
     stop_event: threading.Event,
 ) -> None:
-    """Daemon loop: apply SET_WAYPOINT commands to the shared fleet.
-
-    Per-drone ordering is guaranteed by Kafka because commands are keyed on
-    droneId (see docs/COMMANDS.md). Dedup on commandId so a redelivered command
-    doesn't re-route a drone that already finished the maneuver.
-    """
+    """Daemon loop for SET_WAYPOINT. Kafka key=droneId gives per-drone ordering. Dedup on commandId."""
     consumer = KafkaConsumer(
         args.commands_topic,
         bootstrap_servers=[s.strip() for s in args.bootstrap.split(",") if s.strip()],
@@ -224,7 +191,7 @@ def consume_commands(
         auto_offset_reset="latest",
         enable_auto_commit=True,
         group_id=args.commands_group,
-        # Wake up periodically so we can observe stop_event during shutdown.
+        # Poll timeout so we notice shutdown.
         consumer_timeout_ms=1000,
     )
     print(f"Listening for commands on topic={args.commands_topic!r} group={args.commands_group!r}")
@@ -232,8 +199,7 @@ def consume_commands(
     seen_command_ids: set[str] = set()
     try:
         while not stop_event.is_set():
-            # `for msg in consumer` yields until consumer_timeout_ms elapses with
-            # no records, then exits the for-loop so the while can re-check stop.
+            # Timeout exits the for-loop so we can check stop_event.
             for msg in consumer:
                 if stop_event.is_set():
                     break
@@ -252,7 +218,7 @@ def _apply_command(
         if command_id in seen_command_ids:
             return
         seen_command_ids.add(command_id)
-        # Bounded dedup memory: dev simulator, best-effort is fine.
+        # Bounded dedup set; dev sim, best-effort is fine.
         if len(seen_command_ids) > 4096:
             seen_command_ids.clear()
             seen_command_ids.add(command_id)
@@ -310,8 +276,7 @@ def main() -> None:
         bootstrap_servers=[s.strip() for s in args.bootstrap.split(",") if s.strip()],
         key_serializer=lambda k: k.encode("utf-8"),
         value_serializer=lambda v: json.dumps(v, separators=(",", ":")).encode("utf-8"),
-        # Phase 4 throughput: fire-and-forget. acks=1 (leader only) + batching keeps the
-        # publish loop from blocking on per-message round trips at 1000 drones x 20 Hz.
+        # acks=1 + batching so 1000 drones at 20 Hz don't block on every ack.
         acks=1,
         linger_ms=20,
         batch_size=64 * 1024,
@@ -320,7 +285,7 @@ def main() -> None:
     )
 
     def on_send_error(drone_id: str):
-        # Bound the closure's drone_id so the errback reports the right drone.
+        # Bind drone_id for the errback.
         def _cb(exc: Exception) -> None:
             print(f"Kafka error for {drone_id}: {exc}")
         return _cb
@@ -329,17 +294,14 @@ def main() -> None:
     last_tick = time.monotonic()
     try:
         while True:
-            # Real elapsed time since the previous wave drives time-scaled physics, so the
-            # motion looks the same at any --interval. Clamp to avoid a huge jump if the
-            # loop stalls (e.g. broker backpressure).
+            # Real dt drives physics; clamp to avoid huge jumps on stall.
             now = time.monotonic()
             dt = max(0.001, min(now - last_tick, 1.0))
             last_tick = now
 
-            # Hold the lock only for the quick physics step + payload snapshot, so
-            # the command consumer is never blocked behind network I/O.
+            # Lock only for physics + snapshot, not network I/O.
             with lock:
-                now_ms = int(time.time() * 1000)  # Unix epoch milliseconds
+                now_ms = int(time.time() * 1000)
                 payloads = []
                 for d in drones:
                     d.step_physics(dt)
@@ -354,11 +316,9 @@ def main() -> None:
                         "seqNum": d.seq_num,
                     })
 
-            # Fire-and-forget: enqueue every record without blocking on acks. The client
-            # batches (linger_ms/batch_size) and flushes in the background; errors surface
-            # via the errback. This is the difference between ~50 msg/s and 20k+ msg/s.
+            # Fire-and-forget with background batching; much faster at scale.
             for payload in payloads:
-                # Record KEY is droneId so all events for one drone share one partition.
+                # Key = droneId keeps one drone on one partition.
                 producer.send(
                     args.topic, key=payload["droneId"], value=payload
                 ).add_errback(on_send_error(payload["droneId"]))
@@ -369,7 +329,7 @@ def main() -> None:
     finally:
         stop_event.set()
         producer.flush()
-        producer.close()    # tear down TCP socket
+        producer.close()
         if consumer_thread is not None:
             consumer_thread.join(timeout=2.0)
 

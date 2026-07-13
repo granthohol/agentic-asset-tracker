@@ -52,14 +52,14 @@ function inferMissionKind(plan: ExecutionPlan): string | null {
     return first ? titleCaseMission(first) : null;
 }
 
-/** Compact title + labeled details for the plan puck. */
+/** Title + details for the plan puck. */
 export function summarizePlan(plan: ExecutionPlan): PlanSummary {
     const objective = plan.actions.find((a) => a.op === "upsertObjective");
 
     let summary: string;
     if (objective && objective.op === "upsertObjective" && objective.name?.trim()) {
         const name = objective.name.trim();
-        // Soften stub wording for the card.
+        // Strip "(stub)" from planner placeholder names.
         summary = name.replace(/\s*\(stub\)\s*$/i, "").trim() || name;
     } else {
         const rationale = (plan.rationale ?? "").trim().replace(/\s+/g, " ");
@@ -107,7 +107,7 @@ export function summarizePlan(plan: ExecutionPlan): PlanSummary {
     return { summary, details };
 }
 
-/** One grouped line per mission_type across all setWaypoints, in first-seen order. */
+/** Group setWaypoints by mission_type, one line each, first-seen order. */
 function describeWaypointGroups(plan: ExecutionPlan): string[] {
     const order: string[] = [];
     const counts = new Map<string, number>();
@@ -127,12 +127,7 @@ function cleanName(raw: string | undefined, fallback: string): string {
     return (raw ?? "").trim().replace(/\s*\(stub\)\s*$/i, "").trim() || fallback;
 }
 
-/**
- * Human-readable breakdown of a plan's actions for the expanded puck view. Non-motion
- * actions render one line each in order; all setWaypoints collapse into grouped lines by
- * mission_type (emitted where the first waypoint appears), so a 12-waypoint swarm shows two
- * lines. Unknown ops (e.g. entity ops not in the frontend union) fall back to a title-cased op.
- */
+// Expanded puck: one line per non-waypoint action; waypoints grouped by mission_type.
 export function describePlanSteps(plan: ExecutionPlan): string[] {
     const steps: string[] = [];
     let waypointsEmitted = false;

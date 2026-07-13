@@ -1,4 +1,4 @@
-/** AOI / disturbance circle kept on the map for the life of an approved mission. */
+/** AOI circle for an approved mission. */
 export interface MissionObjective {
     id: string;
     name: string;

@@ -16,7 +16,7 @@ const ZONE_COLOR: Record<ZoneType, string> = {
 const DASH = "6 8";
 const HIGHLIGHT_COLOR = "#e6ebf0";
 
-/** Zip parallel lat/lng arrays into Leaflet [lat, lng] pairs (shortest wins). */
+/** Zip parallel lat/lng arrays into [lat, lng] pairs. */
 function polygonPositions(zone: Zone): [number, number][] {
     const count = Math.min(zone.vertexLats.length, zone.vertexLngs.length);
     const positions: [number, number][] = [];
@@ -26,12 +26,7 @@ function polygonPositions(zone: Zone): [number, number][] {
     return positions;
 }
 
-/**
- * Renders persistent map entities from the store and wires manual editing:
- * click-to-select (when no placement tool is armed), drag-to-move for point
- * entities and circle-zone centers, and a highlight on the selected entity.
- * Writes go through REST; the /ws/entities broadcast refreshes the store.
- */
+// Tracks/waypoints/zones from store. Click to select, drag to move. REST writes, WS refreshes.
 export default function EntityLayer() {
     const tracks = useEntityStore((s) => s.tracks);
     const waypoints = useEntityStore((s) => s.waypoints);
@@ -41,7 +36,7 @@ export default function EntityLayer() {
     const selected = useEntityUiStore((s) => s.selected);
     const select = useEntityUiStore((s) => s.select);
 
-    // Only allow select/drag when not in placement mode.
+    // No select/drag while placing.
     const interactive = activeTool === null;
 
     const isSelected = (kind: string, id: string) =>

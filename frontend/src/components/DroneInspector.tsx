@@ -13,7 +13,7 @@ interface DroneInspectorProps {
     onClose: () => void;
 }
 
-/** Offset from the drone marker so the panel sits up-and-right of the diamond. */
+// Nudge up-right of the marker.
 const FOLLOW_OFFSET = { x: 16, y: -12 };
 
 const ROLE_LABEL: Record<MissionVisualStatus, string> = {
@@ -26,11 +26,7 @@ function fmtCoord(value: number): string {
     return value.toFixed(5);
 }
 
-/**
- * Floating drone read-out. Anchored to the live marker (following the drone and
- * map pan/zoom) until the user drags it, after which it pins to the drop point
- * on screen and stops tracking.
- */
+// Floating read-out. Follows marker until you drag it away.
 export default function DroneInspector({
     drone,
     role,
@@ -39,14 +35,14 @@ export default function DroneInspector({
     onClose,
 }: DroneInspectorProps) {
     const map = useMap();
-    // Bumped on map move/zoom so the following-mode anchor recomputes.
+    // Bump on map move/zoom so follow anchor updates.
     const [, setVersion] = useState(0);
-    // null => following the drone; set => pinned at this container-pixel point.
+    // null = following; set = pinned at pixel coords.
     const [pinned, setPinned] = useState<{ x: number; y: number } | null>(null);
     const [dragging, setDragging] = useState(false);
     const dragRef = useRef<{ pointerId: number; startX: number; startY: number; originX: number; originY: number } | null>(null);
 
-    // Re-anchor while following as the map view changes.
+    // Follow anchor on pan/zoom.
     useEffect(() => {
         if (pinned) return;
         const bump = () => setVersion((v) => v + 1);
@@ -56,7 +52,7 @@ export default function DroneInspector({
         };
     }, [map, pinned]);
 
-    // A new selection (different drone) resets back to following mode.
+    // New drone → follow again.
     useEffect(() => {
         setPinned(null);
     }, [drone.id]);

@@ -10,7 +10,7 @@ import type {
 
 const API_BASE = "http://localhost:8080";
 
-/** Run the LLM planner loop and get back a proposed (read-only) ExecutionPlan. */
+// Hit the planner, get a read-only plan back.
 export async function requestPlan(command: string): Promise<ExecutionPlan> {
     const res = await fetch(`${API_BASE}/api/plan`, {
         method: "POST",
@@ -29,10 +29,7 @@ export interface ExecuteResult {
     receivedAt: number;
 }
 
-/**
- * Approve a plan: send it to the CQRS write gate. Returns 202 + {planId,status,receivedAt}.
- * The plan object is round-tripped verbatim (same JSON the planner produced).
- */
+// Approve and dispatch. Same JSON the planner returned goes straight to the write gate.
 export async function executePlan(plan: ExecutionPlan): Promise<ExecuteResult> {
     const res = await fetch(`${API_BASE}/api/execute-plan`, {
         method: "POST",
@@ -51,7 +48,7 @@ export interface CancelResult {
     cleared: number;
 }
 
-/** HITL Stop: clear waypoints for the given drones (graph + edge CLEAR_WAYPOINT). */
+// Stop mission: clear waypoints for these drones.
 export async function cancelMission(droneIds: string[]): Promise<CancelResult> {
     const res = await fetch(`${API_BASE}/api/cancel-mission`, {
         method: "POST",
@@ -65,9 +62,7 @@ export async function cancelMission(droneIds: string[]): Promise<CancelResult> {
     return JSON.parse(text) as CancelResult;
 }
 
-// ---- Map entity CRUD ----
-// The backend returns 400 with a `{ "error": string }` body on validation
-// failure; surface that message so forms can show it inline.
+// Map entity CRUD. Backend 400s include { error: string }; pass that through to forms.
 
 async function readError(res: Response): Promise<string> {
     const text = await res.text();

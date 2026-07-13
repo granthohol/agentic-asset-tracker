@@ -20,15 +20,10 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
 /**
- * HTTP halves of the Planner-Executor loop plus HITL Stop.
- *
- * <p>{@code POST /api/plan} — read-only: runs the LLM tool-use loop and returns a proposed
- * {@link ExecutionPlan}. Never writes to Neo4j or Kafka.
- *
- * <p>{@code POST /api/execute-plan} — the CQRS write gate: validates an approved plan and
- * <b>publishes it to Kafka</b> ({@code plan.events}), returning {@code 202 Accepted}.
- *
- * <p>{@code POST /api/cancel-mission} — clears waypoints for the given drones (graph + edge).
+ * Planner and executor HTTP API.
+ * POST /api/plan: read-only LLM loop, returns a proposed {@link ExecutionPlan}.
+ * POST /api/execute-plan: validate and publish to Kafka (the write gate).
+ * POST /api/cancel-mission: clear waypoints for listed drones.
  */
 @RestController
 @RequestMapping("/api")
@@ -64,11 +59,7 @@ public class PlanController {
         return serialize(plan);
     }
 
-    /**
-     * Accept the approved plan as a raw JSON string (exactly what {@code /api/plan} returned),
-     * validate it, and enqueue it. Parsing here with the agent mapper guarantees identical
-     * (de)serialization to the rest of the pipeline.
-     */
+    /** Parse the raw plan JSON from /api/plan, validate, enqueue. */
     @PostMapping(value = "/execute-plan", produces = MediaType.APPLICATION_JSON_VALUE)
     public ResponseEntity<String> executePlan(@RequestBody String rawPlanJson) {
         ExecutionPlan plan;

@@ -6,12 +6,8 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Per-plan scratch space for a single {@link PlanExecutor} run. Created fresh for each
- * Kafka message and discarded when execution finishes — never shared across plans.
- *
- * <p>{@code idResolutionMap} maps a plan-local {@code tempId} (e.g. {@code "obj-1"}) to the
- * real id minted when its {@code upsert*} action ran (e.g. {@code "objective-3f2a8c19"}), so
- * later {@code "$obj-1"} references resolve to the persisted node.
+ * Per-plan scratch space during one PlanExecutor run. Fresh per Kafka message.
+ * idResolutionMap: tempId -> real id minted when an upsert ran.
  */
 class ExecutionContext {
 

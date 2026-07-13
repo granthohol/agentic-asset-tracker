@@ -19,30 +19,25 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * Phase 4: streams telemetry to clients as binary Protocol Buffers frames (see
- * {@code proto/telemetry.proto}) instead of JSON text. Two frame kinds go out:
- * a {@code SNAPSHOT} on connect and a coalesced {@code BATCH} on each broadcast tick.
+ * Streams telemetry as binary protobuf frames (see proto/telemetry.proto).
+ * SNAPSHOT on connect, coalesced BATCH on each broadcast tick.
  */
 @Component
 public class TelemetryWebSocket extends TextWebSocketHandler {
 
-    private final Set<WebSocketSession> sessions = ConcurrentHashMap.newKeySet();   // thread safe set to store all sessions on this web socket
+    private final Set<WebSocketSession> sessions = ConcurrentHashMap.newKeySet();
     private final DroneService droneService;
 
-    // Coalesce per-drone telemetry between broadcast ticks. The Kafka listener marks
-    // drones dirty (cheap, in-memory); a scheduled tick serializes all dirty drones into
-    // ONE binary frame. This replaces ~20k JSON frames/s/client with ~20 batched frames/s.
+    // Coalesce dirty drones between ticks. ~20 batched frames/s instead of ~20k JSON frames/s/client.
     private final Map<String, Drone> dirty = new ConcurrentHashMap<>();
 
     public TelemetryWebSocket(DroneService droneService) {
         this.droneService = droneService;
     }
 
-    // method invoked the moment the WebSocket TCP handshake completes successfully
     @Override
     public void afterConnectionEstablished(WebSocketSession session) throws Exception {
-        sessions.add(session);      // store the active TCP socket reference
-
+        sessions.add(session);
         TelemetryFrame snapshot = frame(FrameType.SNAPSHOT, droneService.getAllDrones());
         sendBinary(session, snapshot);
     }
@@ -57,10 +52,7 @@ public class TelemetryWebSocket extends TextWebSocketHandler {
         dirty.put(drone.id(), drone);
     }
 
-    /**
-     * Fixed-tick batch broadcast. Drains the dirty set and sends one binary {@code BATCH}
-     * frame per tick to every open session. No dirty drones => no frame.
-     */
+    /** Drain dirty set, send one BATCH frame per tick. No dirty drones = no frame. */
     @Scheduled(fixedRateString = "${telemetry.broadcast.tick-ms:50}")
     public void flushBatch() {
         if (dirty.isEmpty() || sessions.isEmpty()) {
@@ -68,7 +60,7 @@ public class TelemetryWebSocket extends TextWebSocketHandler {
         }
 
         List<Drone> drones = new ArrayList<>(dirty.values());
-        // Remove exactly what we snapshotted so updates arriving mid-flush survive.
+        // Snapshot what we're flushing; updates mid-flush stay dirty for next tick.
         drones.forEach(d -> dirty.remove(d.id(), d));
 
         byte[] payload = frame(FrameType.BATCH, drones).toByteArray();
@@ -79,7 +71,7 @@ public class TelemetryWebSocket extends TextWebSocketHandler {
                 continue;
             }
             try {
-                synchronized (session) {    // locks so multiple threads dont try to send message at same time
+                synchronized (session) {    // one sender at a time per session
                     session.sendMessage(message);
                 }
             } catch (IOException e) {

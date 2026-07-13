@@ -12,15 +12,11 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
-/**
- * Pure unit tests for the two seams that don't touch the network: turning our
- * provider-agnostic {@link LlmRequest} into the Anthropic Messages request body, and turning
- * a canned Anthropic response body into an {@link LlmResponse}.
- */
+/** Request body build and response parse, no network. */
 class AnthropicLlmClientTest {
 
     private final ObjectMapper mapper = new ObjectMapper();
-    // Defaults under test: thinking disabled, prompt cache on.
+    // thinking off, prompt cache on
     private final AnthropicLlmClient client = new AnthropicLlmClient(
         mapper, "test-key", "claude-sonnet-5", "https://example.invalid/v1/messages",
         "2023-06-01", "disabled", "low", true);
@@ -57,11 +53,11 @@ class AnthropicLlmClientTest {
         assertThat(body.path("max_tokens").asInt()).isEqualTo(2048);
         assertThat(body.path("tools").get(0).path("name").asText()).isEqualTo("list_drones");
 
-        // Cost controls: thinking disabled by default; no output_config in that mode.
+        // thinking off means no output_config
         assertThat(body.path("thinking").path("type").asText()).isEqualTo("disabled");
         assertThat(body.has("output_config")).isFalse();
 
-        // Prompt cache on: system is a cacheable content-block array, not a bare string.
+        // cache on: system is a content-block array
         JsonNode system = body.path("system");
         assertThat(system.isArray()).isTrue();
         assertThat(system.get(0).path("text").asText()).isEqualTo("You are the planner.");
@@ -89,7 +85,7 @@ class AnthropicLlmClientTest {
 
         assertThat(body.path("thinking").path("type").asText()).isEqualTo("adaptive");
         assertThat(body.path("output_config").path("effort").asText()).isEqualTo("medium");
-        // Cache off: system is a plain string.
+        // cache off: plain string
         assertThat(body.path("system").isTextual()).isTrue();
         assertThat(body.path("system").asText()).isEqualTo("You are the planner.");
     }
@@ -114,7 +110,6 @@ class AnthropicLlmClientTest {
         JsonNode messages = mapper.readTree(client.buildRequestBody(request)).path("messages");
         assertThat(messages).hasSize(3);
 
-        // Assistant: a text block followed by a tool_use block.
         JsonNode assistant = messages.get(1);
         assertThat(assistant.path("role").asText()).isEqualTo("assistant");
         JsonNode assistantContent = assistant.path("content");
@@ -124,7 +119,6 @@ class AnthropicLlmClientTest {
         assertThat(assistantContent.get(1).path("name").asText()).isEqualTo("get_low_battery_drones");
         assertThat(assistantContent.get(1).path("input").path("threshold").asInt()).isEqualTo(30);
 
-        // Tool result: user-role message carrying a tool_result block with stringified JSON.
         JsonNode toolMsg = messages.get(2);
         assertThat(toolMsg.path("role").asText()).isEqualTo("user");
         JsonNode resultBlock = toolMsg.path("content").get(0);

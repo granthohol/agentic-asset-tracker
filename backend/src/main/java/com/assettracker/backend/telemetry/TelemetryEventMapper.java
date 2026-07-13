@@ -4,7 +4,6 @@ import com.assettracker.backend.model.DroneStatus;
 
 import org.springframework.stereotype.Component;
 
-// Mapper class to map the TelemetryEvent to a Drone object
 @Component
 public class TelemetryEventMapper {
 

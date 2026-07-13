@@ -1,6 +1,6 @@
 package com.assettracker.backend.agent.formation;
 
-/** Catalog entry returned by {@code list_formations}. */
+/** Catalog entry from list_formations. */
 public record FormationSpec(
     FormationType type,
     String name,

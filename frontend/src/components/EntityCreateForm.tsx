@@ -19,11 +19,7 @@ const KIND_TITLE: Record<string, string> = {
     zone: "New Zone",
 };
 
-/**
- * Inline create popover anchored at the clicked point. Fields depend on the draft
- * kind; zones show a live radius preview circle. On success we clear the draft and
- * let the /ws/entities broadcast add the entity to the map.
- */
+// Popover at click point. Zones get a live radius preview. WS adds the entity after create.
 export default function EntityCreateForm() {
     const map = useMap();
     const draft = useEntityUiStore((s) => s.draft);
@@ -38,7 +34,7 @@ export default function EntityCreateForm() {
     const [error, setError] = useState<string | null>(null);
     const [saving, setSaving] = useState(false);
 
-    // Reset the form whenever a new draft starts.
+    // Reset on new draft.
     useEffect(() => {
         setName("");
         setAffiliation("UNKNOWN");
@@ -49,7 +45,7 @@ export default function EntityCreateForm() {
         setSaving(false);
     }, [draft?.kind, draft?.lat, draft?.lng]);
 
-    // Keep the popover anchored to the draft point as the map view changes.
+    // Stay anchored on pan/zoom.
     useEffect(() => {
         if (!draft) return;
         const bump = () => setVersion((v) => v + 1);

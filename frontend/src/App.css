@@ -46,7 +46,7 @@
   background: #0a0a0a;
 }
 
-/* ---- Drone markers (divIcon) ---- */
+/* Drone markers */
 .drone-marker {
   background: transparent !important;
   border: none !important;
@@ -77,7 +77,7 @@
   background: #0a0a0a;
 }
 
-/* ---- Track markers (contacts) ---- */
+/* Track markers */
 .track-marker {
   background: transparent !important;
   border: none !important;
@@ -104,7 +104,7 @@
   border-radius: 1px;
 }
 
-/* ---- Waypoint markers (points of interest) ---- */
+/* Waypoint markers */
 .waypoint-marker {
   background: transparent !important;
   border: none !important;
@@ -120,7 +120,7 @@
   box-shadow: 0 0 6px rgba(199, 208, 218, 0.5);
 }
 
-/* ---- Drone inspector (click read-out) ---- */
+/* Drone inspector */
 .drone-inspector {
   position: absolute;
   z-index: 1200;
@@ -246,7 +246,7 @@
   color: var(--c2-ink);
 }
 
-/* ---- Left C2 plan console ---- */
+/* Command panel */
 .command-panel {
   display: flex;
   flex-direction: column;
@@ -625,7 +625,7 @@
   background: rgba(196, 74, 74, 0.08);
 }
 
-/* ---- Entity placement toolbar (map overlay) ---- */
+/* Entity toolbar */
 .entity-toolbar {
   position: absolute;
   top: 12px;
@@ -649,12 +649,12 @@
   padding: 0 2px;
 }
 
-/* Crosshair while a placement tool is armed. */
+/* Crosshair while placing */
 .leaflet-container.placing {
   cursor: crosshair;
 }
 
-/* ---- Entity create form (inline popover) & inspector ---- */
+/* Entity create form + inspector */
 .entity-create-form,
 .entity-inspector {
   position: absolute;
@@ -780,7 +780,7 @@
   color: var(--c2-fault);
 }
 
-/* Draggable handle at a selected circle zone's center. */
+/* Circle zone drag handle */
 .zone-handle {
   background: transparent !important;
   border: none !important;

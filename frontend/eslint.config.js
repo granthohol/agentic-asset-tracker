@@ -6,7 +6,7 @@ import tseslint from 'typescript-eslint'
 import { defineConfig, globalIgnores } from 'eslint/config'
 
 export default defineConfig([
-  // src/proto is protobufjs-generated code (npm run proto:gen); don't lint it.
+  // protobufjs output from npm run proto:gen, skip lint
   globalIgnores(['dist', 'src/proto']),
   {
     files: ['**/*.{ts,tsx}'],

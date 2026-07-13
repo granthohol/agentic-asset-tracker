@@ -37,8 +37,7 @@ dependencies {
 
     implementation("org.neo4j.driver:neo4j-java-driver:5.26.0")
 
-    // Phase 4: binary WebSocket payload. Pinned so protoc (codegen) and protobuf-java
-    // (runtime) stay in lockstep; overrides any BOM-managed version.
+    // Phase 4 WS payloads. Pin so protoc and protobuf-java stay matched.
     implementation("com.google.protobuf:protobuf-java:$protobufVersion")
 
     testImplementation("org.springframework.boot:spring-boot-starter-test")
@@ -46,8 +45,7 @@ dependencies {
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }
 
-// Canonical schema lives at repo-root proto/; generate Java from there so backend and
-// frontend share one source of truth.
+// proto/ lives at repo root so backend and frontend share one schema.
 sourceSets {
     main {
         proto {

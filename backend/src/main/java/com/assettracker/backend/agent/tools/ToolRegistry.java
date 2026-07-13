@@ -21,17 +21,9 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
 /**
- * The set of read-only tools the LLM is given during planning, plus a single seam to
- * invoke them by name and to emit their provider-facing specs.
- *
- * <p><b>Architectural invariant:</b> this class (and the whole {@code agent} package)
- * depends only on {@link GraphService} (reads) and other read-only helpers such as
- * {@link FormationService}. It must never import
- * {@code com.assettracker.backend.graph.GraphWriter}. That lexical boundary is what makes
- * "the LLM can read but never mutate" a guarantee rather than a hope.
- *
- * <p>The registry is also the reuse seam for the MCP stretch goal: the same tools can be
- * exposed over an MCP transport without rewriting any graph logic.
+ * Read-only tools for the LLM during planning.
+ * Must never import GraphWriter. That's how we keep the agent from mutating state.
+ * Same tools can be exposed over MCP later without rewriting graph logic.
  */
 @Component
 public class ToolRegistry {
@@ -141,7 +133,7 @@ public class ToolRegistry {
             "list_formations",
             "List named geometric formations the planner can use for swarm routing (RING, WEDGE, LINE). "
                 + "Call this before preview_formation when the operator asks for a swarm or formation. "
-                + "Formations are read-only previews — emit setWaypoint actions from the preview slots; do not invent offsets.",
+                + "Formations are read-only previews. Emit setWaypoint actions from the preview slots; do not invent offsets.",
             objectSchema(props()),
             args -> mapper.valueToTree(formations.listSpecs())
         ));
@@ -156,7 +148,7 @@ public class ToolRegistry {
                 + "at that location (RING is unchanged visually). "
                 + "Returns slots[{droneId, targetLat, targetLng}]. "
                 + "Emit setWaypoint per slot (FORM_UP then ADVANCE for two-phase swarms). "
-                + "Does not move drones — planning only.",
+                + "Does not move drones. Planning only.",
             objectSchema(
                 props(
                     "type", enumField("Formation type from list_formations.", "RING", "WEDGE", "LINE"),
@@ -185,7 +177,7 @@ public class ToolRegistry {
             "Plan a two-phase swarm approach in ONE call. Given a formation type, ordered droneIds, "
                 + "and the AOI (aoiLat/aoiLng), returns COMPACT centers only: a FORM_UP standoff center "
                 + "near the leader (first droneId) and the ADVANCE center (the AOI). Emit two "
-                + "applyFormation actions from these centers (FORM_UP then ADVANCE) — no per-slot "
+                + "applyFormation actions from these centers (FORM_UP then ADVANCE). No per-slot "
                 + "coordinates needed. Returns {formationType, droneCount, formUpCenter{lat,lng}, "
                 + "advanceCenter{lat,lng}}.",
             objectSchema(
@@ -201,7 +193,7 @@ public class ToolRegistry {
             this::previewTwoPhase
         ));
 
-        // --- persistent map entities (tracks / waypoints / zones) -----------
+        // map entities (tracks, waypoints, zones)
         register(new Tool(
             "list_tracks",
             "List every persistent map track (id, name, affiliation, domain, latitude, longitude). "
@@ -256,8 +248,6 @@ public class ToolRegistry {
         ));
     }
 
-    // --- public seam ---------------------------------------------------------
-
     public Collection<Tool> all() {
         return tools.values();
     }
@@ -266,7 +256,7 @@ public class ToolRegistry {
         return tools.containsKey(name);
     }
 
-    /** Invoke a tool by name with a JSON arguments object; returns its JSON result. */
+    /** Invoke a tool by name; returns JSON result. */
     public JsonNode invoke(String name, JsonNode args) {
         Tool tool = tools.get(name);
         if (tool == null) {
@@ -276,7 +266,7 @@ public class ToolRegistry {
         return tool.invoke().apply(safeArgs);
     }
 
-    /** Tool specs pre-serialized to a JSON string (for the web layer / debug endpoint). */
+    /** Tool specs as JSON (for debug / web layer). */
     public String toolSpecsJson() {
         try {
             return mapper.writeValueAsString(toolSpecs());
@@ -285,7 +275,7 @@ public class ToolRegistry {
         }
     }
 
-    /** Provider-facing tool specs: [{ name, description, input_schema }]. */
+    /** Provider tool specs: [{ name, description, input_schema }]. */
     public ArrayNode toolSpecs() {
         ArrayNode arr = mapper.createArrayNode();
         for (Tool tool : tools.values()) {
@@ -298,18 +288,12 @@ public class ToolRegistry {
         return arr;
     }
 
-    // --- compact tool-result builders (token diet) ---------------------------
-
-    /** Round a coordinate to 5 decimals (~1.1 m) to trim tokens in tool results. */
+    /** Round coords to 5 decimals (~1.1 m) to save tokens in tool results. */
     private static double round5(double v) {
         return Math.round(v * 1e5) / 1e5;
     }
 
-    /**
-     * list_drones as a compact columnar table ({@code {fields, rows}}) with only id/lat/lng.
-     * Repeating 50 objects with full field names is the single biggest resent-every-turn payload;
-     * columnar drops the repeated keys and battery/status the planner doesn't need for geometry.
-     */
+    /** list_drones as {fields, rows} columnar table. Way cheaper than 50 full JSON objects every turn. */
     private ObjectNode dronesColumnar(List<DroneNode> drones) {
         ObjectNode out = mapper.createObjectNode();
         ArrayNode fields = out.putArray("fields");
@@ -326,7 +310,7 @@ public class ToolRegistry {
         return out;
     }
 
-    /** Serialize a formation preview with coordinates rounded to 5 decimals. */
+    /** Formation preview with coords rounded to 5 decimals. */
     private JsonNode previewJson(FormationPreview preview) {
         ObjectNode node = (ObjectNode) mapper.valueToTree(preview);
         node.put("centerLat", round5(node.path("centerLat").asDouble()));
@@ -342,15 +326,14 @@ public class ToolRegistry {
         return node;
     }
 
-    /** Compact two-phase swarm preview: both formation centers, no per-slot coordinates. */
+    /** Two-phase swarm preview: both centers, no per-slot coords. */
     private JsonNode previewTwoPhase(JsonNode args) {
         FormationType type = FormationType.parse(requireString(args, "formationType"));
         List<String> droneIds = requireStringList(args, "droneIds");
         double aoiLat = requireDouble(args, "aoiLat");
         double aoiLng = requireDouble(args, "aoiLng");
 
-        // Standoff is measured from the leader (first id); resolve its live position from the
-        // graph. If unknown, standoffCenter falls back to "south of the AOI".
+        // Standoff from leader (first id). Unknown leader -> south of AOI.
         String leaderId = droneIds.get(0);
         var leader = graph.getDroneById(leaderId);
         double leaderLat = leader.map(d -> d.drone().latitude()).orElse(aoiLat);
@@ -377,9 +360,9 @@ public class ToolRegistry {
         return f;
     }
 
-    // --- JSON Schema helpers -------------------------------------------------
+    // JSON Schema helpers
 
-    /** Build a JSON Schema {@code properties} object from alternating (name, fieldSchema) pairs. */
+    /** Build a JSON Schema properties object from (name, fieldSchema) pairs. */
     private ObjectNode props(Object... pairs) {
         ObjectNode p = mapper.createObjectNode();
         for (int i = 0; i < pairs.length; i += 2) {
@@ -418,7 +401,7 @@ public class ToolRegistry {
         return schema;
     }
 
-    // --- argument extraction (throws IllegalArgumentException the loop surfaces back to the model) ---
+    // arg parsing; IllegalArgumentException bubbles back to the model
 
     private String requireString(JsonNode args, String key) {
         JsonNode v = args.get(key);

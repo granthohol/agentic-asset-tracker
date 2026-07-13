@@ -1,6 +1,6 @@
 package com.assettracker.backend.agent.formation;
 
-/** One drone assignment in a {@link FormationPreview}. */
+/** One drone slot in a FormationPreview. */
 public record FormationSlot(
     String droneId,
     double targetLat,

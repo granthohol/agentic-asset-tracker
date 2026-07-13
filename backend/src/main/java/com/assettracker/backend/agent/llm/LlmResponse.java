@@ -2,11 +2,7 @@ package com.assettracker.backend.agent.llm;
 
 import java.util.List;
 
-/**
- * One model response. Either the model wants to run tools ({@code TOOL_USE}, with a
- * non-empty {@code toolCalls}) or it produced its final answer ({@code END}, with
- * {@code text} holding the {@code ExecutionPlan} JSON).
- */
+/** Model reply: wants tools (TOOL_USE) or final text (END, usually ExecutionPlan JSON). */
 public record LlmResponse(
     StopReason stopReason,
     String text,

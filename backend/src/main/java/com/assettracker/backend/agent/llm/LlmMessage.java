@@ -3,15 +3,8 @@ package com.assettracker.backend.agent.llm;
 import java.util.List;
 
 /**
- * One turn in the conversation, provider-agnostic. A concrete {@link LlmClient} maps these
- * to its own wire format (Anthropic blocks, OpenAI messages, etc.).
- *
- * <ul>
- *   <li>{@code USER} — operator prompt (or a correction we inject).</li>
- *   <li>{@code ASSISTANT} — model output: free {@code text} and/or {@code toolCalls}.</li>
- *   <li>{@code TOOL} — our local execution results ({@code toolResults}) for the prior
- *       assistant's tool calls.</li>
- * </ul>
+ * One turn in the conversation. LlmClient maps these to provider wire format.
+ * USER: operator prompt. ASSISTANT: model text and/or tool calls. TOOL: our tool results.
  */
 public record LlmMessage(
     Role role,

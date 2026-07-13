@@ -18,7 +18,6 @@ public class DroneController {
         this.droneService = droneService;
     }
     
-    // runs on "GET /drones" request
     @GetMapping("/drones")
     public List<Drone> getDrones() {
         return droneService.getAllDrones();

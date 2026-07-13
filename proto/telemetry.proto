@@ -1,8 +1,7 @@
 syntax = "proto3";
 
-// Phase 4 binary WebSocket payload (server -> client) for /ws/drones.
-// Single source of truth: the backend Gradle protobuf plugin and the frontend
-// ts-proto codegen both read this file. Kafka edge->backend stays JSON.
+// Binary WS payload for /ws/drones. Shared schema for Java + ts-proto codegen.
+// Kafka edge path stays JSON.
 
 package assettracker.telemetry;
 

@@ -19,19 +19,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
-/**
- * Real {@link LlmClient} backed by Anthropic's Messages API (Claude). One instance performs
- * a single request/response; the multi-turn loop stays in
- * {@link com.assettracker.backend.agent.AgentOrchestrationService}.
- *
- * <p>Activated only when {@code llm.provider=anthropic}; otherwise {@link StubLlmClient}
- * remains the default bean (so tests and offline dev need no API key). This is the whole
- * point of the {@link LlmClient} seam: swapping the model is swapping which bean is active,
- * with zero orchestrator changes.
- *
- * <p>{@link ToolRegistry#toolSpecs()} already emits Anthropic's native tool shape
- * ({@code {name, description, input_schema}}), so we forward it verbatim.
- */
+/** Real LlmClient via Anthropic Messages API. Active when llm.provider=anthropic. */
 @Component
 @ConditionalOnProperty(name = "llm.provider", havingValue = "anthropic")
 public class AnthropicLlmClient implements LlmClient {
@@ -44,12 +32,11 @@ public class AnthropicLlmClient implements LlmClient {
     private final String model;
     private final String baseUrl;
     private final String anthropicVersion;
-    /** "disabled" (cheapest, default) or "adaptive". Sonnet 5 defaults thinking ON, which
-     *  bills at the output rate — expensive for a structured tool-use task like planning. */
+    /** disabled (default) or adaptive. Sonnet 5 bills thinking as output; pricey for planning. */
     private final String thinkingMode;
-    /** Effort level when thinkingMode="adaptive": low|medium|high|xhigh|max. */
+    /** Effort when thinking=adaptive: low|medium|high|xhigh|max. */
     private final String effort;
-    /** Cache the (identical-every-turn) system prompt + tool specs to cut repeated input cost. */
+    /** Cache system prompt + tool specs to cut repeat input cost. */
     private final boolean promptCache;
 
     public AnthropicLlmClient(
@@ -63,8 +50,7 @@ public class AnthropicLlmClient implements LlmClient {
         @Value("${anthropic.prompt-cache:true}") boolean promptCache
     ) {
         if (apiKey == null || apiKey.isBlank()) {
-            // Fail fast: this bean only exists when llm.provider=anthropic, so a missing key
-            // is a misconfiguration we want surfaced at startup, not on the first prompt.
+            // Missing API key should fail at startup, not on first prompt.
             throw new IllegalStateException(
                 "llm.provider=anthropic but anthropic.api-key is blank. Set ANTHROPIC_API_KEY "
                     + "(or anthropic.api-key), or use llm.provider=stub for offline mode.");
@@ -114,15 +100,12 @@ public class AnthropicLlmClient implements LlmClient {
         return parseResponse(response.body());
     }
 
-    // --- request building ----------------------------------------------------
-
     String buildRequestBody(LlmRequest request) {
         ObjectNode root = mapper.createObjectNode();
         root.put("model", model);
         root.put("max_tokens", request.maxTokens());
 
-        // Thinking is the dominant cost lever on Sonnet 5 (billed as output). Default to
-        // disabled for this structured planning task; allow adaptive+effort opt-in.
+        // Thinking is the main cost knob on Sonnet 5. Off by default for planning.
         ObjectNode thinking = mapper.createObjectNode();
         if ("adaptive".equalsIgnoreCase(thinkingMode)) {
             thinking.put("type", "adaptive");
@@ -135,16 +118,14 @@ public class AnthropicLlmClient implements LlmClient {
             root.set("thinking", thinking);
         }
 
-        // Tools are identical every turn; forward verbatim. The system-prompt cache breakpoint
-        // below also caches the tools prefix (canonical cache order is tools -> system -> messages).
+        // Tools are identical every turn; forward as-is.
         if (request.tools() != null && !request.tools().isNull()) {
             root.set("tools", request.tools());
         }
 
         if (request.system() != null && !request.system().isBlank()) {
             if (promptCache) {
-                // Send system as a cacheable content block so the (large, unchanging) prompt
-                // + preceding tool specs are cached across the multi-turn loop.
+                // Cache the big unchanging system prompt across multi-turn loops.
                 ArrayNode systemBlocks = mapper.createArrayNode();
                 ObjectNode block = systemBlocks.addObject();
                 block.put("type", "text");
@@ -205,7 +186,7 @@ public class AnthropicLlmClient implements LlmClient {
             toolUse.set("input", call.input() == null ? mapper.createObjectNode() : call.input());
             content.add(toolUse);
         }
-        // Anthropic rejects an empty content array; guarantee at least one block.
+        // Anthropic rejects empty content arrays.
         if (content.isEmpty()) {
             ObjectNode textBlock = mapper.createObjectNode();
             textBlock.put("type", "text");
@@ -216,7 +197,7 @@ public class AnthropicLlmClient implements LlmClient {
         return msg;
     }
 
-    /** Tool results are sent back as a user-role message of tool_result blocks. */
+    /** Tool results go back as a user message of tool_result blocks. */
     private ObjectNode toolResultMessage(LlmMessage message) {
         ObjectNode msg = mapper.createObjectNode();
         msg.put("role", "user");
@@ -225,7 +206,7 @@ public class AnthropicLlmClient implements LlmClient {
             ObjectNode block = mapper.createObjectNode();
             block.put("type", "tool_result");
             block.put("tool_use_id", result.toolCallId());
-            // Anthropic expects tool_result content as text; hand back the JSON verbatim.
+            // tool_result content must be text; stringify the JSON.
             block.put("content", stringifyContent(result.content()));
             if (result.isError()) {
                 block.put("is_error", true);
@@ -249,8 +230,6 @@ public class AnthropicLlmClient implements LlmClient {
             return String.valueOf(content);
         }
     }
-
-    // --- response parsing ----------------------------------------------------
 
     LlmResponse parseResponse(String bodyJson) {
         JsonNode root;
@@ -282,8 +261,7 @@ public class AnthropicLlmClient implements LlmClient {
             }
         }
 
-        // stop_reason=="tool_use" is the canonical signal, but keying off collected tool
-        // calls is more robust to minor schema drift.
+        // Prefer checking toolCalls; stop_reason drifts across API versions.
         if (!toolCalls.isEmpty() || "tool_use".equals(root.path("stop_reason").asText())) {
             return LlmResponse.toolUse(text.toString(), toolCalls);
         }
@@ -291,11 +269,8 @@ public class AnthropicLlmClient implements LlmClient {
     }
 
     /**
-     * Log the token breakdown so cost and cache effectiveness are visible per turn.
-     * If {@code cacheWrite} and {@code cacheRead} are both 0 across a whole plan, the
-     * prompt caching never engaged — most often because the cacheable prefix
-     * (tools + system) is below the model's minimum (4,096 tokens on Haiku 4.5,
-     * 1,024 on Sonnet 5); the API skips caching silently in that case.
+     * Log token usage per turn. cacheWrite/cacheRead both 0 means caching never kicked in
+     * (prefix too small; Haiku needs 4096 tokens, Sonnet 1024).
      */
     private void logUsage(JsonNode usage) {
         if (usage == null || usage.isMissingNode()) {

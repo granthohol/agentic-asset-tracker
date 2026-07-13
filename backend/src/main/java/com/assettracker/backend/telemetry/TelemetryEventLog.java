@@ -18,12 +18,11 @@ public class TelemetryEventLog {
 
     private final String sqlitePath;
 
-    public TelemetryEventLog(@Value("${telemetry.log.sqlite.path}") String sqlitePath) {    // reads from application.properties for database path
+    public TelemetryEventLog(@Value("${telemetry.log.sqlite.path}") String sqlitePath) {
         this.sqlitePath = sqlitePath;
     }
 
-    // @PostConstruct: binds the method to the beans initialization phase
-    // Spring container executes method exactly once on startup
+    // Runs once at startup to create the table if needed.
     @PostConstruct
     public void initialize() {
         ensureParentDirectoryExists();
@@ -82,12 +81,7 @@ public class TelemetryEventLog {
 
     }
 
-    /**
-     * Phase 4: append a whole batch of events in one connection + one transaction using
-     * JDBC batching. Opening a fresh connection and auto-committing per event (as
-     * {@link #append}) collapses under 1000-drone load; the persistence buffer drains its
-     * queue here every flush tick instead.
-     */
+    /** Batch insert in one transaction. Per-event append doesn't scale at 1000 drones. */
     public void appendBatch(List<TelemetryEvent> events) {
         if (events.isEmpty()) {
             return;

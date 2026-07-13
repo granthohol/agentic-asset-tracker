@@ -15,7 +15,7 @@ import org.springframework.stereotype.Service;
 
 import com.assettracker.backend.model.DroneStatus;
 
-// read API over the graph stored in Neo4j
+// Read-only Neo4j queries.
 @Service
 public class GraphService {
     private final Driver driver;
@@ -239,7 +239,7 @@ public class GraphService {
         return drones; 
     }
     
-    // ---- Map entities (Phase 1): :Track / :Waypoint / :Zone ----
+    // Tracks, waypoints, zones
 
     public List<TrackNode> listTracks() {
         List<TrackNode> tracks = new ArrayList<>();
@@ -359,11 +359,10 @@ public class GraphService {
         return out;
     }
 
-    // Mapping a neo4j cypher return type 'node' to the DroneNode object
     private DroneNode mapDroneNode(Node node) {
         DroneStatus status = DroneStatus.valueOf(node.get("status").asString());
     
-        // Prefer flat primitive properties (Neo4j cannot store nested maps on nodes).
+        // Waypoint lat/lng are flat props (Neo4j has no nested maps)
         Waypoint currentWaypoint = null;
         var lat = node.get("currentWaypointLat");
         var lng = node.get("currentWaypointLng");
@@ -381,7 +380,6 @@ public class GraphService {
         );
     }
 
-    // Mapping a neo4j cypher return type 'node' to the SquadronNode object
     private SquadronNode mapSquadronNode(Node node) {
         return new SquadronNode(
             node.get("id").asString(),

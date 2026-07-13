@@ -50,7 +50,7 @@ class PlanValidatorTest {
 
     @Test
     void rejectsRefThatComesBeforeDeclaration() {
-        // Deploy references $obj-1 before the upsert that declares it.
+        // deploy before upsert declares $obj-1
         assertThatThrownBy(() -> validator.validate(plan(
             new PlanAction.DeploySquadronToObjective("squadron-alpha", "$obj-1"),
             new PlanAction.UpsertObjective(null, "obj-1", "Observe", 1, null, null, null, null)

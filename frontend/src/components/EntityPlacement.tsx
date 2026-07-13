@@ -3,11 +3,7 @@ import { useMap, useMapEvents } from "react-leaflet";
 
 import { useEntityUiStore } from "../store/entityUiStore";
 
-/**
- * Bridges the armed placement tool to the map: a background click while a tool is
- * armed opens a create draft at that point. Also shows a crosshair cursor while
- * arming and cancels the tool/draft on Escape. Renders nothing.
- */
+// Click map while a tool is armed → create draft. Escape cancels.
 export default function EntityPlacement() {
     const map = useMap();
     const activeTool = useEntityUiStore((s) => s.activeTool);
@@ -22,7 +18,7 @@ export default function EntityPlacement() {
         },
     });
 
-    // Crosshair cursor on the map container while a tool is armed.
+    // Crosshair while placing.
     useEffect(() => {
         const container = map.getContainer();
         if (activeTool) {
@@ -35,7 +31,7 @@ export default function EntityPlacement() {
         };
     }, [map, activeTool]);
 
-    // Escape backs out of placement / an open draft.
+    // Escape backs out of tool or draft.
     useEffect(() => {
         const onKey = (e: KeyboardEvent) => {
             if (e.key === "Escape") {

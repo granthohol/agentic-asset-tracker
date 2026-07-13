@@ -104,7 +104,7 @@ class PlanExecutorTest {
 
         executor.execute(plan);
 
-        // The macro expands to one setWaypoint per drone (no ADVANCE gate for a single phase).
+        // one setWaypoint per drone, no FORM_UP gate
         verify(commandPublisher, times(3)).publishSetWaypoint(
             Mockito.anyString(), Mockito.anyDouble(), Mockito.anyDouble(), Mockito.eq("RECON"));
         verify(commandPublisher).publishSetWaypoint(

@@ -1,6 +1,6 @@
 package com.assettracker.backend.graph;
 
-/** C2 affiliation of a tracked contact (see {@link TrackNode}). */
+/** Friendly, hostile, or unknown. */
 public enum Affiliation {
     FRIENDLY,
     HOSTILE,

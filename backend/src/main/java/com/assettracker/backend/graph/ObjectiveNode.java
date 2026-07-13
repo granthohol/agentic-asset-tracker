@@ -1,7 +1,7 @@
 package com.assettracker.backend.graph;
 
-// Optional location fields: see docs/ONTOLOGY.md for which combinations are valid.
-// All four optional fields use boxed types so null = "not set" is distinguishable from 0.
+// Optional location fields, see docs/ONTOLOGY.md for valid combos.
+// Boxed types so null ("not set") is distinct from 0.
 public record ObjectiveNode(
     String id,
     String name,

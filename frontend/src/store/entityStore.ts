@@ -12,11 +12,11 @@ interface EntityState {
     tracks: Map<string, Track>;
     waypoints: Map<string, MapWaypoint>;
     zones: Map<string, Zone>;
-    /** Replace all entities from a WS snapshot (sent on connect/reconnect). */
+    /** Full snapshot on connect/reconnect. */
     applySnapshot: (snap: EntitySnapshotMessage) => void;
-    /** Insert or update a single entity from an entityUpsert frame. */
+    /** Single entity upsert from WS. */
     applyUpsert: (kind: EntityKind, entity: Track | MapWaypoint | Zone) => void;
-    /** Remove a single entity from an entityDelete frame. */
+    /** Single entity delete from WS. */
     applyDelete: (kind: EntityKind, id: string) => void;
 }
 

@@ -11,13 +11,9 @@ import com.assettracker.backend.graph.WaypointNode;
 import com.assettracker.backend.graph.ZoneNode;
 
 /**
- * The single synchronous write seam for persistent map entities. Both manual REST
- * edits ({@link com.assettracker.backend.controller.EntityController}) and, in a later
- * phase, the plan executor route through here so every create/update/delete lands in
- * Neo4j and fans out over {@link EntityWebSocket} the same way.
- *
- * <p>Unlike drone commands, these are ontology annotations (not hardware commands), so
- * they are written directly/synchronously rather than through the Kafka plan pipeline.
+ * One write path for tracks, waypoints, and zones. REST and the plan executor both
+ * come through here: Neo4j write, then {@link EntityWebSocket} broadcast.
+ * Map annotations, not drone commands, so no Kafka pipeline.
  */
 @Service
 public class EntityService {
@@ -83,7 +79,7 @@ public class EntityService {
             graphService.listZones());
     }
 
-    /** Keep a caller-supplied id (update path); otherwise mint one (create path). */
+    /** Reuse the id on update, generate one on create. */
     private static String ensureId(String id, String prefix) {
         if (id != null && !id.isBlank()) {
             return id;

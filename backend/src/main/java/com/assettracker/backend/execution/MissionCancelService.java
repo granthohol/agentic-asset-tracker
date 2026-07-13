@@ -11,10 +11,7 @@ import org.springframework.stereotype.Service;
 import com.assettracker.backend.command.CommandPublisher;
 import com.assettracker.backend.graph.GraphWriter;
 
-/**
- * HITL Stop: clear waypoints in Neo4j and publish {@code CLEAR_WAYPOINT} so the edge
- * sim stops steering. Invoked only via {@code POST /api/cancel-mission}.
- */
+/** Clear waypoints in Neo4j + publish CLEAR_WAYPOINT. POST /api/cancel-mission only. */
 @Service
 public class MissionCancelService {
 

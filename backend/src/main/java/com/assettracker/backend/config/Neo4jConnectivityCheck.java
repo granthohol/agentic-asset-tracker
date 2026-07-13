@@ -8,9 +8,7 @@ import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
 import org.springframework.stereotype.Component;
 
-// ApplicationRunner: Spring invokes run(...) once after the context is fully
-// initialized but before the app is marked "ready". Perfect place to fail loud
-// if Neo4j is misconfigured, instead of crashing later on the first real query.
+// Ping Neo4j at startup so bad config fails fast.
 @Component
 public class Neo4jConnectivityCheck implements ApplicationRunner {
 
@@ -24,8 +22,6 @@ public class Neo4jConnectivityCheck implements ApplicationRunner {
 
     @Override
     public void run(ApplicationArguments args) {
-        // try-with-resources: session is checked back into the pool on close,
-        // even if the Cypher call throws.
         try (Session session = driver.session()) {
             int ok = session.run("RETURN 1 AS ok").single().get("ok").asInt();
             if (ok != 1) {

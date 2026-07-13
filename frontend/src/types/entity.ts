@@ -1,12 +1,11 @@
-// Persistent, backend-owned map entities (Phase 1 ontology). Field names mirror the
-// wire JSON from /api/entities and the /ws/entities feed exactly.
+// Backend map entities. Field names match /api and /ws/entities JSON.
 
 export type Affiliation = "FRIENDLY" | "HOSTILE" | "UNKNOWN";
 export type TrackDomain = "AERIAL" | "GROUND";
 export type ZoneType = "RESTRICTED" | "PATROL";
 export type ZoneShape = "CIRCLE" | "POLYGON";
 
-/** A tracked contact (friendly/hostile/unknown). Static in Phase 1. */
+/** Tracked contact (friendly/hostile/unknown). */
 export interface Track {
     id: string;
     name: string;
@@ -16,7 +15,7 @@ export interface Track {
     longitude: number;
 }
 
-/** A standalone, labeled point of interest. Distinct from a drone's tasking waypoint. */
+/** Labeled map POI. Not the same as a drone tasking waypoint. */
 export interface MapWaypoint {
     id: string;
     name: string;
@@ -24,10 +23,7 @@ export interface MapWaypoint {
     longitude: number;
 }
 
-/**
- * An area on the map. CIRCLE => center + radiusMeters set (vertex arrays empty).
- * POLYGON => vertexLats/vertexLngs are parallel arrays (center/radius null).
- */
+/** CIRCLE: center + radius. POLYGON: parallel vertexLats/vertexLngs. */
 export interface Zone {
     id: string;
     name: string;
@@ -40,12 +36,10 @@ export interface Zone {
     vertexLngs: number[];
 }
 
-/** Discriminator used by the /ws/entities upsert/delete frames. */
+/** Kind tag on /ws/entities upsert/delete frames. */
 export type EntityKind = "track" | "waypoint" | "zone";
 
-// ---- Write-request shapes (mirror the backend controller DTOs) ----
-// Note: zone WRITES use `vertices: [lat,lng][]`, while zone READS use the
-// parallel `vertexLats`/`vertexLngs` arrays (see Zone above).
+// Write DTOs. Zone writes use vertices: [lat,lng][]; reads use vertexLats/vertexLngs.
 
 export interface TrackRequest {
     name: string;

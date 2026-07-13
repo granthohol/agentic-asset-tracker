@@ -23,20 +23,14 @@ function isFormUpMission(missionType?: string): boolean {
     return m === "FORM_UP" || m === "HOLD";
 }
 
-/**
- * Map overlays for HITL plans.
- * - Pending: orange FORM_UP wedge + blue AOI (hide ADVANCE until after approve/form-up).
- * - Accepted: green dashed lines whose start always tracks the live drone.
- * - Active objectives: AOI stays after approve until the mission routes finish.
- */
+// Plan overlays: pending (orange), accepted (green, tracks live drone), AOI circles.
 export default function PlanOverlayLayer({
     pendingPlan,
     acceptedRoutes,
     activeObjectives,
     drones,
 }: PlanOverlayLayerProps) {
-    // Two-phase plans include FORM_UP + ADVANCE; proposal mode only shows the form-up
-    // assembly so we don't draw two identical wedges (standoff + AOI) at once.
+    // Two-phase plan: only show FORM_UP wedge while proposed (skip duplicate ADVANCE wedge).
     const pendingHasFormUp =
         pendingPlan?.actions.some(
             (a) => a.op === "setWaypoint" && isFormUpMission(a.mission_type),
@@ -54,7 +48,7 @@ export default function PlanOverlayLayer({
     const pendingLineWeight = swarmMode ? 1.5 : 2;
     const objectiveRadiusBoost = swarmMode ? 1.15 : 1;
 
-    // Prefer active (approved) objectives; fall back to pending proposal AOI.
+    // Approved objectives win; else show pending AOI.
     const objectives: MissionObjective[] =
         activeObjectives.length > 0
             ? activeObjectives

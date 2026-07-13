@@ -27,26 +27,17 @@ import com.assettracker.backend.service.DroneService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 /**
- * The single, auditable write seam for user intent. Consumes approved plans from
- * {@code plan.events}, walks the actions in order, mints real ids for {@code tempId}
- * upserts, resolves {@code $tempId} references, and dispatches each action to
- * {@link GraphWriter} (Neo4j) or {@link CommandPublisher} (the {@code drone.commands.v1}
- * motion topic).
- *
- * <p>Two-phase swarm: all {@code FORM_UP} waypoints are published first; before the first
- * {@code ADVANCE} (or other non-FORM_UP) waypoint, the executor waits until live telemetry
- * shows the swarm has formed (or a timeout), then publishes the advance wave.
+ * Consumes approved plans from plan.events. Walks actions in order, mints tempIds,
+ * resolves $refs, writes to Neo4j or publishes motion commands.
+ * Two-phase swarms: publish all FORM_UP first, wait for arrival, then ADVANCE.
  */
 @Component
 public class PlanExecutor {
 
     private static final Logger log = LoggerFactory.getLogger(PlanExecutor.class);
 
-    // The edge glides to the waypoint and snaps to the *exact* target on the final sub-step
-    // (producer.py _steer_toward_target), so an arrived drone reports distance ~0. A tight
-    // epsilon means the FORM_UP gate waits for the last drone to truly reach its slot; a large
-    // slack (the old ~0.002° / ~222 m) advanced the swarm while drones were still gliding in.
-    // Keep in sync with DroneMap.tsx ARRIVAL_DEG.
+    // Edge snaps to exact target on final sub-step, so arrived drones report distance ~0.
+    // Tight epsilon = wait for last drone to reach its slot. Keep in sync with DroneMap.tsx ARRIVAL_DEG.
     static final double ARRIVAL_DEG = 0.0002;
     static final long FORM_UP_TIMEOUT_MS = 90_000L;
     static final long FORM_UP_POLL_MS = 300L;
@@ -90,14 +81,12 @@ public class PlanExecutor {
         execute(envelope.plan());
     }
 
-    /** Walk the plan's actions in order; fail-fast on the first error. */
+    /** Walk actions in order. Fail-fast on first error. */
     void execute(ExecutionPlan plan) {
         ExecutionContext ctx = new ExecutionContext(plan.planId());
         List<FormUpTarget> formUps = new ArrayList<>();
         boolean waitedForFormUp = false;
-        // Defensively flatten any applyFormation macros into per-drone setWaypoints so the
-        // FORM_UP -> wait -> ADVANCE gate below always operates on concrete waypoints. Plans
-        // from the orchestrator are already expanded; this covers any other producer.
+        // Defensive expand: orchestrator already does this, but other producers might not.
         List<PlanAction> actions = planExpander.expandActions(plan.actions());
         log.info("Executing plan {} ({} action(s))", plan.planId(), actions.size());
 
@@ -119,7 +108,7 @@ public class PlanExecutor {
             } catch (Exception e) {
                 String line = "[" + i + "] " + action.getClass().getSimpleName() + " FAILED: " + e.getMessage();
                 ctx.report.add(line);
-                log.error("  {} -- halting plan {}", line, plan.planId());
+                log.error("  {}, halting plan {}", line, plan.planId());
                 log.error("Plan {} partial report: {}", plan.planId(), ctx.report);
                 return;
             }
@@ -156,14 +145,13 @@ public class PlanExecutor {
                 }
             }
             case PlanAction.ApplyFormation a ->
-                // Unreachable: execute() flattens every applyFormation into setWaypoints first.
+                // Should never hit: execute() expands these first.
                 throw new IllegalStateException("applyFormation must be expanded before dispatch");
             case PlanAction.ClearWaypoint a -> {
                 graphWriter.clearDroneWaypoint(a.droneId());
                 commandPublisher.publishClearWaypoint(a.droneId());
             }
-            // Persistent map entities route through EntityService (Neo4j + WS broadcast),
-            // not GraphWriter directly, so agent edits show on the live map like manual ones.
+            // Map entities go through EntityService so agent edits show on the live map.
             case PlanAction.UpsertTrack a -> {
                 String id = resolveUpsertId(a.id(), a.tempId(), "track", ctx);
                 entityService.upsertTrack(new TrackNode(
@@ -183,7 +171,7 @@ public class PlanExecutor {
         }
     }
 
-    /** Build a ZoneNode from an upsertZone action (circle center+radius, or polygon vertices). */
+    /** Build ZoneNode from upsertZone (circle or polygon). */
     private static ZoneNode toZoneNode(String id, PlanAction.UpsertZone a) {
         if (a.shape() == ZoneShape.CIRCLE) {
             return new ZoneNode(
@@ -207,18 +195,18 @@ public class PlanExecutor {
         long deadline = System.currentTimeMillis() + FORM_UP_TIMEOUT_MS;
         while (System.currentTimeMillis() < deadline) {
             if (allFormed(formUps)) {
-                log.info("Plan {}: FORM_UP complete — publishing ADVANCE wave", planId);
+                log.info("Plan {}: FORM_UP complete, publishing ADVANCE wave", planId);
                 return;
             }
             try {
                 Thread.sleep(FORM_UP_POLL_MS);
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
-                log.warn("Plan {}: FORM_UP wait interrupted — advancing anyway", planId);
+                log.warn("Plan {}: FORM_UP wait interrupted, advancing anyway", planId);
                 return;
             }
         }
-        log.warn("Plan {}: FORM_UP wait timed out — advancing anyway", planId);
+        log.warn("Plan {}: FORM_UP wait timed out, advancing anyway", planId);
     }
 
     private boolean allFormed(List<FormUpTarget> formUps) {

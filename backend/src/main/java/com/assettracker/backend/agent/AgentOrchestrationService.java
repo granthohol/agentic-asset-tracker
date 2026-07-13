@@ -21,21 +21,15 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
-/**
- * Runs the multi-turn LLM tool-use loop server-side and returns a validated, read-only
- * {@link ExecutionPlan}. This is the "planner brain": it reasons over the graph via
- * {@link ToolRegistry} read tools and emits a plan. It <b>never</b> mutates state — there
- * is no {@code GraphWriter} or {@code CommandPublisher} on this path. Approval and
- * execution happen later (steps 11-12).
- */
+/** LLM tool-use loop. Reads the graph via tools, returns a plan. Never writes to the graph. */
 @Service
 public class AgentOrchestrationService {
 
     private static final Logger log = LoggerFactory.getLogger(AgentOrchestrationService.class);
 
-    /** Hard cap so a confused model cannot loop (and bill) forever.  */
+    /** Cap turns so a confused model can't loop (and bill) forever. */
     static final int MAX_TURNS = 6;
-    /** How many times we ask the model to fix malformed plan JSON before giving up. */
+    /** Retries after bad plan JSON before we give up. */
     static final int MAX_PLAN_RETRIES = 2;
     static final int MAX_TOKENS = 2048;
 
@@ -51,12 +45,12 @@ public class AgentOrchestrationService {
           - Zone: a named area; type RESTRICTED|PATROL; shape CIRCLE (center + radiusMeters) or POLYGON (>=3 [lat,lng]).
 
         Use the READ-ONLY tools to ground every decision in real ids/state before planning. Never
-        invent ids — discover them via list_*/get_*_by_id first. A zone's center is a good AOI when
+        invent ids. Discover them via list_*/get_*_by_id first. A zone's center is a good AOI when
         the operator names an area instead of coordinates.
 
         Swarm / formation requests: pick a type (RING, WEDGE, LINE). Choose drones from the prompt:
-        explicit ids (drone-000, …), a count ("5 drones"), else ALL drones from list_drones. Call
-        preview_two_phase(formationType, droneIds, aoiLat, aoiLng) ONCE — it returns
+        explicit ids (drone-000, etc.), a count ("5 drones"), else ALL drones from list_drones. Call
+        preview_two_phase(formationType, droneIds, aoiLat, aoiLng) ONCE. It returns
         { formationType, droneCount, formUpCenter{lat,lng}, advanceCenter{lat,lng} }. Then emit TWO
         applyFormation actions (do NOT emit per-drone setWaypoint for swarms): first at formUpCenter
         with mission_type FORM_UP and facingLat/facingLng set to the AOI; then at advanceCenter with
@@ -102,10 +96,7 @@ public class AgentOrchestrationService {
         this.mapper = mapper;
     }
 
-    /**
-     * Turn a natural-language command into a proposed {@link ExecutionPlan}. Read-only:
-     * the returned plan is a proposal that the operator must approve before anything runs.
-     */
+    /** Natural-language command in, proposed plan out. Operator still has to approve it. */
     public ExecutionPlan planFromPrompt(String userCommand) {
         List<LlmMessage> messages = new ArrayList<>();
         messages.add(LlmMessage.user(userCommand));
@@ -122,13 +113,11 @@ public class AgentOrchestrationService {
                 continue;
             }
 
-            // Final answer: must parse + validate as an ExecutionPlan.
+            // Final answer: parse as ExecutionPlan.
             try {
                 ExecutionPlan plan = parsePlan(response.text());
                 validate(plan);
-                // Expand compact applyFormation macros into per-drone setWaypoints BEFORE the plan
-                // leaves the server, so the frontend and executor only ever see setWaypoints. A bad
-                // macro (e.g. empty droneIds) throws here and triggers the retry path below.
+                // Expand applyFormation into setWaypoints before the plan leaves the server.
                 ExecutionPlan expanded = planExpander.expand(plan);
                 ExecutionPlan finalized = ensurePlanId(expanded);
                 log.info("Planner produced plan {} with {} action(s) in {} turn(s)",
@@ -171,7 +160,7 @@ public class AgentOrchestrationService {
         return mapper.readValue(stripFences(text), ExecutionPlan.class);
     }
 
-    /** Tolerate a model that wraps JSON in ```json fences despite instructions. */
+    /** Strip ```json fences if the model ignored instructions. */
     private String stripFences(String text) {
         if (text == null) {
             throw new IllegalArgumentException("empty model response");
@@ -193,7 +182,7 @@ public class AgentOrchestrationService {
         if (plan == null || plan.actions() == null) {
             throw new IllegalArgumentException("plan or actions missing");
         }
-        // Deeper checks ($tempId resolvability, id-vs-tempId, bounds) live in /api/execute-plan.
+        // Deeper validation ($tempId refs, bounds) lives in /api/execute-plan.
     }
 
     private ExecutionPlan ensurePlanId(ExecutionPlan plan) {

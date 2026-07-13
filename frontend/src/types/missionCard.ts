@@ -3,7 +3,7 @@ import type { PlanDetail } from "../utils/summarizePlan";
 
 export type MissionCardStatus = "proposed" | "running";
 
-/** Compact HITL card shown in the command panel (not the full action dump). */
+/** Compact plan card in the command panel. */
 export interface MissionCard {
     planId: string;
     summary: string;

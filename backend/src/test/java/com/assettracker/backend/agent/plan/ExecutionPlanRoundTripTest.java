@@ -40,11 +40,11 @@ class ExecutionPlanRoundTripTest {
 
         assertThat(plan.actions().get(1)).isInstanceOf(PlanAction.DeploySquadronToObjective.class);
         PlanAction.DeploySquadronToObjective deploy = (PlanAction.DeploySquadronToObjective) plan.actions().get(1);
-        assertThat(deploy.objectiveId()).isEqualTo("$obj-1"); // $tempId preserved as a raw string
+        assertThat(deploy.objectiveId()).isEqualTo("$obj-1"); // $tempId stays raw
 
         assertThat(plan.actions().get(2)).isInstanceOf(PlanAction.SetWaypoint.class);
         PlanAction.SetWaypoint wp = (PlanAction.SetWaypoint) plan.actions().get(2);
-        assertThat(wp.missionType()).isEqualTo("RECON"); // mission_type -> missionType mapping
+        assertThat(wp.missionType()).isEqualTo("RECON"); // mission_type maps to missionType
     }
 
     @Test
@@ -53,13 +53,13 @@ class ExecutionPlanRoundTripTest {
         String reserialized = mapper.writeValueAsString(first);
         ExecutionPlan second = mapper.readValue(reserialized, ExecutionPlan.class);
 
-        // Records give us structural equality across the full polymorphic graph.
+        // records compare by value
         assertThat(second).isEqualTo(first);
 
-        // The discriminator survives serialization (so the round-trip is self-describing).
+        // op discriminator survives round-trip
         assertThat(reserialized).contains("\"op\":\"upsertObjective\"");
         assertThat(reserialized).contains("\"mission_type\":\"RECON\"");
-        // NON_NULL: optional fields that were absent stay absent.
+        // NON_NULL omits absent optionals
         assertThat(reserialized).doesNotContain("targetEntityId");
     }
 
@@ -96,7 +96,7 @@ class ExecutionPlanRoundTripTest {
         assertThat(zone.vertices().get(0)).containsExactly(39.0, -77.2);
 
         PlanAction.UpsertObjective obj = (PlanAction.UpsertObjective) plan.actions().get(2);
-        assertThat(obj.targetEntityId()).isEqualTo("$trk-1"); // entity $ref preserved
+        assertThat(obj.targetEntityId()).isEqualTo("$trk-1"); // $ref preserved
 
         assertThat(plan.actions().get(3)).isInstanceOf(PlanAction.RemoveZone.class);
 
@@ -128,14 +128,14 @@ class ExecutionPlanRoundTripTest {
         PlanAction.ApplyFormation af = (PlanAction.ApplyFormation) plan.actions().get(0);
         assertThat(af.formationType())
             .isEqualTo(com.assettracker.backend.agent.formation.FormationType.WEDGE);
-        assertThat(af.missionType()).isEqualTo("FORM_UP"); // mission_type -> missionType mapping
+        assertThat(af.missionType()).isEqualTo("FORM_UP"); // mission_type maps to missionType
         assertThat(af.droneIds()).containsExactly("drone-000", "drone-001");
         assertThat(af.centerLat()).isEqualTo(39.032);
 
         String reserialized = mapper.writeValueAsString(plan);
         assertThat(reserialized).contains("\"op\":\"applyFormation\"");
         assertThat(reserialized).contains("\"mission_type\":\"FORM_UP\"");
-        assertThat(reserialized).doesNotContain("spacingMeters"); // NON_NULL: absent optional stays absent
+        assertThat(reserialized).doesNotContain("spacingMeters"); // NON_NULL omits spacingMeters
 
         ExecutionPlan second = mapper.readValue(reserialized, ExecutionPlan.class);
         assertThat(second).isEqualTo(plan);

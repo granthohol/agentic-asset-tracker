@@ -2,11 +2,7 @@ package com.assettracker.backend.agent.llm;
 
 import com.fasterxml.jackson.databind.JsonNode;
 
-/**
- * The result of executing a {@link ToolCall} locally, fed back to the model.
- * {@code toolCallId} matches {@link ToolCall#id()}. {@code isError} flags that the tool
- * threw (e.g. bad arguments) so the model can correct itself on the next turn.
- */
+/** Local result for a ToolCall. isError=true if the tool threw so the model can retry. */
 public record ToolResult(
     String toolCallId,
     String toolName,

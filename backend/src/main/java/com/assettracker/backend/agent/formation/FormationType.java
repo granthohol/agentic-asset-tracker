@@ -1,10 +1,6 @@
 package com.assettracker.backend.agent.formation;
 
-/**
- * Named geometric layouts the planner can preview via {@code list_formations} /
- * {@code preview_formation}. Geometry is deterministic Java — the LLM only chooses
- * which type and where to center it.
- */
+/** Formation layouts (RING, WEDGE, LINE). Geometry is Java; the LLM picks type and center. */
 public enum FormationType {
     RING,
     WEDGE,

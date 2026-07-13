@@ -10,8 +10,7 @@ import org.springframework.context.annotation.Configuration;
 @Configuration
 public class Neo4jConfig {
 
-    // destroyMethod = "close" -> Spring calls driver.close() on context shutdown,
-    // returning the Bolt connection pool to the OS cleanly.
+    // Close the driver pool on shutdown.
     @Bean(destroyMethod = "close")
     public Driver neo4jDriver(
             @Value("${neo4j.uri}") String uri,

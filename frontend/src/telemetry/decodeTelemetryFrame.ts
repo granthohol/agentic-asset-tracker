@@ -19,10 +19,7 @@ function toStatus(status: number): DroneStatus {
     }
 }
 
-/**
- * Phase 4: decode a binary /ws/drones frame (proto/telemetry.proto) into our Drone shape.
- * SNAPSHOT is the full fleet on connect; BATCH is a coalesced set of updates per tick.
- */
+// Binary /ws/drones frame → Drone[]. SNAPSHOT = full fleet; BATCH = tick updates.
 export function decodeTelemetryFrame(buffer: ArrayBuffer): DecodedFrame {
     const frame = TelemetryFrame.decode(new Uint8Array(buffer));
     const drones: Drone[] = (frame.drones ?? []).map((d) => ({

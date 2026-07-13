@@ -15,11 +15,8 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * Live feed for persistent map entities (tracks / waypoints / zones), mirroring
- * {@link com.assettracker.backend.telemetry.TelemetryWebSocket}. On connect a client
- * receives a full {@code snapshot}; thereafter {@link EntityService} pushes
- * {@code entityUpsert} / {@code entityDelete} frames as entities change (from either
- * manual REST edits or, later, the plan executor).
+ * WS feed for map entities, same idea as {@link com.assettracker.backend.telemetry.TelemetryWebSocket}.
+ * Snapshot on connect, then upsert/delete events from {@link EntityService}.
  */
 @Component
 public class EntityWebSocket extends TextWebSocketHandler {
@@ -50,7 +47,7 @@ public class EntityWebSocket extends TextWebSocketHandler {
         sessions.remove(session);
     }
 
-    /** kind = "track" | "waypoint" | "zone"; entity = the persisted node record. */
+    /** kind: track, waypoint, or zone */
     public void broadcastUpsert(String kind, Object entity) {
         broadcast(Map.of("type", "entityUpsert", "kind", kind, "entity", entity));
     }

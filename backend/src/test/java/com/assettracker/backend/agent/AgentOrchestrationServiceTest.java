@@ -54,7 +54,7 @@ class AgentOrchestrationServiceTest {
             .map(a -> (PlanAction.SetWaypoint) a)
             .toList();
 
-        assertThat(waypoints).hasSize(12); // all 6 available × 2 phases
+        assertThat(waypoints).hasSize(12); // 6 drones, 2 phases
         List<PlanAction.SetWaypoint> formUps = waypoints.stream()
             .filter(w -> "FORM_UP".equals(w.missionType())).toList();
         List<PlanAction.SetWaypoint> advances = waypoints.stream()

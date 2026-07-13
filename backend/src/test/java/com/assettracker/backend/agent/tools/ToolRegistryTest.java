@@ -94,9 +94,9 @@ class ToolRegistryTest {
 
         assertThat(result.get("rows")).hasSize(2);
         JsonNode row0 = result.get("rows").get(0);
-        assertThat(row0).hasSize(3); // battery/status trimmed out
+        assertThat(row0).hasSize(3); // no battery/status columns
         assertThat(row0.get(0).asText()).isEqualTo("drone-000");
-        assertThat(row0.get(1).asDouble()).isEqualTo(39.07311); // rounded to 5 dp
+        assertThat(row0.get(1).asDouble()).isEqualTo(39.07311); // 5 decimal places
         assertThat(row0.get(2).asDouble()).isEqualTo(-89.40121);
     }
 
@@ -120,9 +120,9 @@ class ToolRegistryTest {
         assertThat(result.get("droneCount").asInt()).isEqualTo(3);
         assertThat(result.get("advanceCenter").get("lat").asDouble()).isEqualTo(39.05);
         assertThat(result.get("advanceCenter").get("lng").asDouble()).isEqualTo(-77.18);
-        // Standoff is pulled back from the AOI toward the leader (due south here).
+        // standoff pulled south from AOI toward leader
         assertThat(result.get("formUpCenter").get("lat").asDouble()).isLessThan(39.05);
-        assertThat(result.has("slots")).isFalse(); // summary only, no per-slot payload
+        assertThat(result.has("slots")).isFalse(); // centers only, no slots
         verify(graph).getDroneById("drone-000");
     }
 

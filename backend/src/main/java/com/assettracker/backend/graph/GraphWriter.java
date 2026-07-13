@@ -28,12 +28,7 @@ public class GraphWriter {
         }
     }
 
-    /**
-     * Phase 4: batch-upsert many drone projections in one round trip via UNWIND. The
-     * telemetry persistence buffer coalesces to newest-per-drone before calling this, so a
-     * whole tick's worth of position updates becomes a single Cypher statement instead of
-     * one session/transaction per event.
-     */
+    // One Cypher statement per tick; buffer already keeps newest state per drone.
     public void upsertDronesBatch(Collection<DroneNode> drones) {
         if (drones.isEmpty()) {
             return;
@@ -72,10 +67,7 @@ public class GraphWriter {
         }
     }
 
-    // Both endpoints are matched up front. If either is missing the whole
-    // statement produces zero rows and we throw -- so we never delete the old
-    // edge unless we can also create the new one. RETURN gives us a row count
-    // to assert on.
+    // Both ends must exist before we swap the edge.
     public void assignDroneToSquadron(String droneId, String squadronId) {
         try (Session session = driver.session()) {
             Result result = session.run(
@@ -114,7 +106,7 @@ public class GraphWriter {
 
     public void setDroneWaypoint(String droneId, Waypoint waypoint) {
         try (Session session = driver.session()) {
-            // Neo4j node properties cannot be nested maps — store lat/lng as primitives.
+            // Flat lat/lng props, no nested map.
             session.run(
                 "MATCH (d:Drone {id:$d}) "
                     + "SET d.currentWaypointLat = $lat, d.currentWaypointLng = $lng "
@@ -149,9 +141,7 @@ public class GraphWriter {
         }
     }
 
-    // Idempotent: if the drone isn't there, MATCH yields zero rows and nothing
-    // happens. DETACH DELETE removes the node and any incident relationships
-    // (e.g. ASSIGNED_TO) in one pass so we don't leave dangling edges.
+    // Safe if the drone's already gone. DETACH DELETE cleans up edges too.
     public void deleteDrone(String droneId) {
         try (Session session = driver.session()) {
             session.run("MATCH (d:Drone {id:$d}) DETACH DELETE d",
@@ -159,7 +149,7 @@ public class GraphWriter {
         }
     }
 
-    // ---- Map entities (Phase 1): standalone :Track / :Waypoint / :Zone nodes ----
+    // Map entities
 
     public void upsertTrack(TrackNode track) {
         try (Session session = driver.session()) {
@@ -192,8 +182,7 @@ public class GraphWriter {
 
     public void upsertZone(ZoneNode zone) {
         try (Session session = driver.session()) {
-            // Polygon vertices are stored as two parallel primitive arrays because Neo4j
-            // node properties cannot be nested maps/lists-of-lists.
+            // Polygon verts as two flat arrays.
             session.run(
                 "MERGE (z:Zone {id: $id}) "
                     + "SET z.name = $name, z.type = $type, z.shape = $shape, "

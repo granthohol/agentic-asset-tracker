@@ -2,13 +2,13 @@ import { create } from 'zustand';
 
 import type { EntityKind } from '../types/entity';
 
-/** A selected entity reference (kind + id); the live data is read from entityStore. */
+/** Selected entity (kind + id). Live data comes from entityStore. */
 export interface EntitySelection {
     kind: EntityKind;
     id: string;
 }
 
-/** A pending create: where the user clicked and what kind of entity to place. */
+/** Pending create: click location + entity kind. */
 export interface EntityDraft {
     kind: EntityKind;
     lat: number;
@@ -16,11 +16,11 @@ export interface EntityDraft {
 }
 
 interface EntityUiState {
-    /** Armed placement tool (map clicks create this kind); null = select/inspect mode. */
+    /** Armed placement tool; null = select/inspect. */
     activeTool: EntityKind | null;
-    /** Currently inspected entity, or null. */
+    /** Inspected entity, or null. */
     selected: EntitySelection | null;
-    /** In-progress create (drives the inline create form), or null. */
+    /** Open create form, or null. */
     draft: EntityDraft | null;
 
     setTool: (kind: EntityKind) => void;
@@ -31,12 +31,7 @@ interface EntityUiState {
     clearDraft: () => void;
 }
 
-/**
- * Transient map-interaction state (tool mode, selection, in-progress create).
- * Kept separate from entityStore, which is a pure mirror of the /ws/entities feed.
- * Arming a tool clears any selection/draft, and vice versa, so only one mode is
- * ever active.
- */
+// Tool mode, selection, draft. Separate from entityStore (WS mirror). Only one mode at a time.
 export const useEntityUiStore = create<EntityUiState>((set) => ({
     activeTool: null,
     selected: null,

@@ -24,13 +24,8 @@ import com.assettracker.backend.graph.ZoneShape;
 import com.assettracker.backend.graph.ZoneType;
 
 /**
- * Synchronous CRUD for persistent map entities (tracks / waypoints / zones). Manual,
- * apply-immediately edits from the client land here, go through {@link EntityService}
- * (Neo4j + WS broadcast), and return the persisted node with its minted id.
- *
- * <p>Invalid enum values are rejected by Jackson (400). Geometry rules (radius, vertex
- * count, coordinate ranges) are checked here; full plan-level parity arrives with the
- * agent phase in {@code PlanValidator}.
+ * REST CRUD for tracks, waypoints, and zones. Writes go through {@link EntityService}.
+ * Jackson handles bad enums; geometry validation lives here (PlanValidator is stricter).
  */
 @RestController
 @RequestMapping("/api")
@@ -47,7 +42,7 @@ public class EntityController {
         return entityService.snapshot();
     }
 
-    // ---- Tracks ----
+    // Tracks
 
     public record TrackRequest(
         String name, Affiliation affiliation, TrackDomain domain, Double latitude, Double longitude) {}
@@ -77,7 +72,7 @@ public class EntityController {
             id, r.name(), r.affiliation(), r.domain(), r.latitude(), r.longitude())));
     }
 
-    // ---- Waypoints ----
+    // Waypoints
 
     public record WaypointRequest(String name, Double latitude, Double longitude) {}
 
@@ -109,7 +104,7 @@ public class EntityController {
             id, r.name(), r.latitude(), r.longitude())));
     }
 
-    // ---- Zones ----
+    // Zones
 
     public record ZoneRequest(
         String name,
@@ -158,7 +153,6 @@ public class EntityController {
                 new double[0], new double[0])));
         }
 
-        // POLYGON
         if (r.vertices() == null || r.vertices().size() < 3) {
             return badRequest("polygon requires at least 3 vertices");
         }
@@ -180,7 +174,7 @@ public class EntityController {
             id, r.name(), r.type(), r.shape(), null, null, null, lats, lngs)));
     }
 
-    // ---- helpers ----
+    // Validation helpers
 
     private String validateTrack(TrackRequest r) {
         if (isBlank(r.name())) {

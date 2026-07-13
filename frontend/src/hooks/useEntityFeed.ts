@@ -5,11 +5,7 @@ import type { EntityMessage } from '../types/entity';
 
 const WEBSOCKET_URL = 'ws://localhost:8080/ws/entities';
 
-/**
- * Subscribes to the persistent-entity feed and mirrors it into the entity store.
- * Mount once (e.g. in App). Reconnect-with-backoff matches the drone telemetry
- * socket in DroneMap; the server replays a full snapshot on every (re)connect.
- */
+// Mount once in App. Same reconnect/backoff as DroneMap; server replays a snapshot on connect.
 export function useEntityFeed(): void {
     useEffect(() => {
         const { applySnapshot, applyUpsert, applyDelete } = useEntityStore.getState();
@@ -72,7 +68,7 @@ export function useEntityFeed(): void {
             };
 
             ws.onerror = () => {
-                // onclose follows onerror in browsers; reconnect is scheduled there.
+                // onclose runs after onerror; reconnect happens there.
             };
         };
 

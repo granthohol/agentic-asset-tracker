@@ -71,12 +71,12 @@ function droneIdsFromPlan(plan: ExecutionPlan): string[] {
 }
 
 function App() {
-  // Subscribe once to the persistent-entity feed (tracks/waypoints/zones).
+  // Entity feed (tracks/waypoints/zones). Mount once.
   useEntityFeed();
 
   const [pendingPlan, setPendingPlan] = useState<ExecutionPlan | null>(null);
   const [acceptedRoutes, setAcceptedRoutes] = useState<AcceptedRoute[]>([]);
-  /** Disturbance / AOI circles — survive approve until the mission routes finish. */
+  /** AOI circles stick around until the mission routes finish. */
   const [activeObjectives, setActiveObjectives] = useState<MissionObjective[]>([]);
   const [missionCard, setMissionCard] = useState<MissionCard | null>(null);
   const [planning, setPlanning] = useState(false);
@@ -86,7 +86,7 @@ function App() {
   const [panelPct, setPanelPct] = useState(PANEL_PCT_DEFAULT);
   const [resizing, setResizing] = useState(false);
   const appRef = useRef<HTMLDivElement>(null);
-  /** Full approved plan kept so we can swap FORM_UP overlays → ADVANCE after form-up. */
+  /** Kept so we can swap FORM_UP overlays for ADVANCE after form-up. */
   const approvedPlanRef = useRef<ExecutionPlan | null>(null);
 
   const flash = (t: Toast) => {
@@ -188,8 +188,7 @@ function App() {
     });
   }, []);
 
-  // Mission finished: drop AOI + puck, and release the drones so they resume free
-  // flight instead of sitting frozen on station where the maneuver ended.
+  // Mission done: clear AOI + puck, send CLEAR_WAYPOINT so drones roam again.
   useEffect(() => {
     if (
       acceptedRoutes.length === 0
@@ -203,7 +202,7 @@ function App() {
       if (finishedPlan) {
         const droneIds = droneIdsFromPlan(finishedPlan);
         if (droneIds.length > 0) {
-          // Best-effort CLEAR_WAYPOINT; a transient failure just leaves them holding.
+          // Best effort. Failure just leaves them holding station.
           void cancelMission(droneIds).catch(() => {});
         }
       }

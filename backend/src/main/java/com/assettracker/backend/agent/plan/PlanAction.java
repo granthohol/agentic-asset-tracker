@@ -13,19 +13,9 @@ import com.fasterxml.jackson.annotation.JsonSubTypes;
 import com.fasterxml.jackson.annotation.JsonTypeInfo;
 
 /**
- * One executable operation in an {@link ExecutionPlan}. The {@code op} string is the
- * polymorphic discriminator: Jackson reads it to pick the concrete record, and
- * serialization writes it back. Anything whose {@code op} is not listed in
- * {@link JsonSubTypes} fails to deserialize — <b>the schema is the policy</b>.
- *
- * <p>This is a {@code sealed} interface: the permitted set below is the complete,
- * exhaustive vocabulary the {@code PlanExecutor} can dispatch. Adding a capability
- * is a deliberate code change here, never emergent LLM behavior.
- *
- * <p><b>Temporary-id references.</b> Any id-typed string argument may be either a real
- * Neo4j id (must already exist) or a {@code "$tempId"} reference to an entity created
- * earlier in the same plan via an {@code upsert*} action's {@code tempId}. Resolution
- * happens in the executor, not here. See docs/PLAN.md.
+ * One action in an ExecutionPlan. op is the Jackson discriminator.
+ * Sealed interface: this list is the full vocabulary PlanExecutor can run.
+ * Id fields can be a real id or $tempId (declared earlier in the same plan). See docs/PLAN.md.
  */
 @JsonTypeInfo(use = JsonTypeInfo.Id.NAME, include = JsonTypeInfo.As.PROPERTY, property = "op")
 @JsonSubTypes({
@@ -47,11 +37,7 @@ import com.fasterxml.jackson.annotation.JsonTypeInfo;
 })
 public sealed interface PlanAction {
 
-    /**
-     * Create or update a squadron. Provide exactly one of {@code id} (an existing
-     * squadron to update) or {@code tempId} (a placeholder the executor replaces with a
-     * freshly-minted real id, recorded for later {@code $tempId} references in this plan).
-     */
+    /** Create or update a squadron. Exactly one of id (existing) or tempId (minted on execute). */
     @JsonInclude(JsonInclude.Include.NON_NULL)
     record UpsertSquadron(
         String id,
@@ -60,12 +46,7 @@ public sealed interface PlanAction {
         String sectorId
     ) implements PlanAction {}
 
-    /**
-     * Create or update an objective. Optional geo fields describe where it is:
-     * a point ({@code centerLatitude}/{@code centerLongitude}), an area
-     * ({@code radiusMeters}), or a tracked entity ({@code targetEntityId}). See
-     * docs/ONTOLOGY.md for the location semantics. {@code id} xor {@code tempId} as above.
-     */
+    /** Create or update an objective. id xor tempId. See docs/ONTOLOGY.md for location fields. */
     @JsonInclude(JsonInclude.Include.NON_NULL)
     record UpsertObjective(
         String id,
@@ -100,11 +81,7 @@ public sealed interface PlanAction {
         String squadronId
     ) implements PlanAction {}
 
-    /**
-     * Motion intent: route a drone to a waypoint. The executor both publishes a
-     * {@code SET_WAYPOINT} command (to the edge) and mirrors the target into the graph.
-     * {@code mission_type} is snake_case on the wire to match the command contract.
-     */
+    /** Route a drone to a waypoint. Publishes SET_WAYPOINT and mirrors target into the graph. */
     @JsonInclude(JsonInclude.Include.NON_NULL)
     record SetWaypoint(
         String droneId,
@@ -114,12 +91,8 @@ public sealed interface PlanAction {
     ) implements PlanAction {}
 
     /**
-     * Compact swarm macro: place {@code droneIds} into a {@code formationType} formation around
-     * ({@code centerLat}, {@code centerLng}), optionally facing ({@code facingLat},
-     * {@code facingLng}). The backend <b>expands</b> this into one {@link SetWaypoint} per drone
-     * (carrying {@code missionType}) before the plan leaves the orchestrator or reaches the
-     * executor — the frontend and executor only ever see the resulting {@code setWaypoint}s. Lets
-     * the model emit ~2 actions for a two-phase swarm instead of ~100. See docs/PLAN.md.
+     * Swarm macro: expands to per-drone setWaypoints before the plan hits the executor.
+     * Lets the model emit ~2 actions for a two-phase swarm instead of ~100.
      */
     @JsonInclude(JsonInclude.Include.NON_NULL)
     record ApplyFormation(
@@ -138,10 +111,7 @@ public sealed interface PlanAction {
         String droneId
     ) implements PlanAction {}
 
-    /**
-     * Create or update a persistent map track (a tracked contact). {@code id} xor
-     * {@code tempId} as with the other upserts. This is a map annotation, not a drone.
-     */
+    /** Create or update a map track (static contact, not a drone). id xor tempId. */
     @JsonInclude(JsonInclude.Include.NON_NULL)
     record UpsertTrack(
         String id,
@@ -153,11 +123,7 @@ public sealed interface PlanAction {
         Double longitude
     ) implements PlanAction {}
 
-    /**
-     * Create or update a persistent, labeled map waypoint (point of interest).
-     * <b>Distinct from {@link SetWaypoint}</b>, which is ephemeral drone motion tasking;
-     * this is a durable {@code :Waypoint} marker on the map.
-     */
+    /** Persistent map waypoint (POI). Not the same as setWaypoint, which is drone motion. */
     @JsonInclude(JsonInclude.Include.NON_NULL)
     record UpsertWaypoint(
         String id,
@@ -167,11 +133,7 @@ public sealed interface PlanAction {
         Double longitude
     ) implements PlanAction {}
 
-    /**
-     * Create or update a map zone. CIRCLE => {@code centerLatitude}/{@code centerLongitude}
-     * + {@code radiusMeters}. POLYGON => {@code vertices} as [[lat,lng],...] with >= 3 points.
-     * {@code id} xor {@code tempId} as above.
-     */
+    /** Map zone. CIRCLE needs center + radiusMeters. POLYGON needs vertices (>= 3). id xor tempId. */
     @JsonInclude(JsonInclude.Include.NON_NULL)
     record UpsertZone(
         String id,

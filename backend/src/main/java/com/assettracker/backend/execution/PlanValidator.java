@@ -11,18 +11,9 @@ import com.assettracker.backend.agent.plan.PlanAction;
 import com.assettracker.backend.graph.ZoneShape;
 
 /**
- * Pre-publish validation for {@code /api/execute-plan}. Rejects a plan (throws
- * {@link IllegalArgumentException}) before anything is enqueued, so a malformed plan never
- * reaches the executor. This is the structural/intra-plan layer of validation:
- *
- * <ul>
- *   <li>every upsert declares exactly one of {@code id} or {@code tempId};</li>
- *   <li>every {@code "$ref"} resolves to a {@code tempId} declared <b>earlier</b> in the list;</li>
- *   <li>required string fields are present; coordinates are in range.</li>
- * </ul>
- *
- * Existence of literal ids in Neo4j is verified later by the executor (it cannot be known
- * here without a graph read, and we keep this layer pure/fast).
+ * Pre-publish validation for /api/execute-plan. Rejects bad plans before they hit Kafka.
+ * Checks: id xor tempId, $refs resolve to earlier tempIds, coords in range.
+ * Literal id existence is checked later by the executor.
  */
 @Component
 public class PlanValidator {
@@ -156,7 +147,7 @@ public class PlanValidator {
         }
     }
 
-    /** Returns the tempId (or null if a literal id was used). Enforces exactly-one. */
+    /** Returns tempId, or null if a literal id was used. */
     private String requireXorId(String id, String tempId, int index, String op) {
         boolean hasId = isText(id);
         boolean hasTemp = isText(tempId);
@@ -181,7 +172,7 @@ public class PlanValidator {
         }
     }
 
-    /** A reference that may be a literal id or a "$tempId" pointing at an earlier upsert. */
+    /** Literal id or $tempId pointing at an earlier upsert. */
     private void requireRefResolvable(String value, Set<String> declaredTempIds, int index, String field) {
         requireText(value, index, field);
         if (value.startsWith("$")) {
@@ -194,7 +185,7 @@ public class PlanValidator {
         }
     }
 
-    /** A field that must be a present literal id (no $ref allowed, e.g. drone ids). */
+    /** Must be a literal id, no $ref (e.g. drone ids). */
     private void requireLiteral(String value, int index, String field) {
         requireText(value, index, field);
         if (value.startsWith("$")) {
@@ -209,7 +200,7 @@ public class PlanValidator {
     }
 
     private void requireLatLng(Double lat, Double lng, int index, String op) {
-        // Center is optional; but if one is present, both must be, and both in range.
+        // Center optional, but if one is set both must be and both in range.
         if (lat == null && lng == null) {
             return;
         }
@@ -221,7 +212,7 @@ public class PlanValidator {
         requireCoord(lng, -180, 180, index, op + ".centerLongitude");
     }
 
-    /** Both coordinates required and in range (map entities always have a position). */
+    /** Both coords required and in range. */
     private void requireBothLatLng(Double lat, Double lng, int index, String op) {
         if (lat == null || lng == null) {
             throw new IllegalArgumentException(

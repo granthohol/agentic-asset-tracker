@@ -11,14 +11,8 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 /**
- * Publishes motion commands to Kafka topic {@code drone.commands.v1}.
- *
- * <p><b>CQRS write seam (motion half).</b> This is the ONLY component that turns a
- * waypoint intent into a Kafka command. Callers are {@code PlanExecutor} and
- * {@code MissionCancelService} (HITL Stop) — never the browser directly.
- *
- * <p>{@code commandId} is minted here (server-side UUID) so the Python edge
- * consumer can dedup redelivered commands.
+ * Publishes motion commands to drone.commands.v1.
+ * Only PlanExecutor and MissionCancelService call this, never the browser.
  */
 @Component
 public class CommandPublisher {
@@ -35,12 +29,7 @@ public class CommandPublisher {
         this.mapper = mapper;
     }
 
-    /**
-     * Stamp a fresh {@code commandId} + {@code issuedAt} onto the waypoint intent and
-     * publish it keyed on {@code droneId} (per-drone ordering survives partitioning).
-     *
-     * @return the fully-stamped event that was published (useful for logging / audit).
-     */
+    /** Fresh commandId + issuedAt, keyed on droneId for per-drone ordering. */
     public CommandEvent publishSetWaypoint(String droneId, double targetLat, double targetLng, String missionType) {
         CommandEvent event = new CommandEvent(
             CommandEvent.TYPE_SET_WAYPOINT,
@@ -57,7 +46,7 @@ public class CommandPublisher {
         return event;
     }
 
-    /** Clear the drone's active waypoint so the edge resumes free movement. */
+    /** Clear waypoint so the edge resumes free movement. */
     public CommandEvent publishClearWaypoint(String droneId) {
         CommandEvent event = new CommandEvent(
             CommandEvent.TYPE_CLEAR_WAYPOINT,

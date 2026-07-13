@@ -8,13 +8,8 @@ import org.springframework.web.bind.annotation.RestController;
 import com.assettracker.backend.agent.tools.ToolRegistry;
 
 /**
- * Dev/debug surface for inspecting the read-only tool catalog the orchestrator hands the
- * LLM. This is exactly the {@code tools=[...]} payload (name + description + input_schema)
- * the model sees. Read-only; safe to leave on locally. In a hardened deployment, gate this
- * behind {@code @Profile("dev")}.
- *
- * <p>Returns a pre-serialized JSON string (built with the Jackson 2 agent mapper) so we
- * don't hand Jackson 2 node objects to Spring Boot 4's Jackson 3 web converter.
+ * Peek at the tool catalog the LLM sees. Fine for local dev; add @Profile("dev") in prod.
+ * Returns a pre-serialized string to avoid Jackson 2/3 mixing in the web layer.
  */
 @RestController
 @RequestMapping("/api/debug")

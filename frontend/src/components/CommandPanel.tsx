@@ -29,9 +29,7 @@ function headerStatus(
     return "Agent ready";
 }
 
-/**
- * Left-rail C2 plan console: create plans, review ticket, accept / abort.
- */
+// Left rail: plan, review, accept/abort.
 export default function CommandPanel({
     planning,
     executing,
@@ -50,7 +48,7 @@ export default function CommandPanel({
     const status = headerStatus(planning, executing, stopping, missionCard);
     const fault = toast?.kind === "error" ? toast.message : null;
 
-    // Collapse the detail view whenever a different plan takes over the puck.
+    // Collapse details when the plan changes.
     const planId = missionCard?.planId ?? null;
     useEffect(() => {
         setExpanded(false);
