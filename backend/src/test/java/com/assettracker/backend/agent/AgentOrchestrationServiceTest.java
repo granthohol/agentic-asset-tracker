@@ -11,10 +11,14 @@ import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
 
 import com.assettracker.backend.agent.formation.FormationService;
+import com.assettracker.backend.agent.llm.LlmClient;
+import com.assettracker.backend.agent.llm.LlmRequest;
+import com.assettracker.backend.agent.llm.LlmResponse;
 import com.assettracker.backend.agent.llm.StubLlmClient;
 import com.assettracker.backend.agent.plan.ExecutionPlan;
 import com.assettracker.backend.agent.plan.PlanAction;
 import com.assettracker.backend.agent.plan.PlanExpander;
+import com.assettracker.backend.agent.routing.RestrictedZoneObstacles;
 import com.assettracker.backend.agent.tools.ToolRegistry;
 import com.assettracker.backend.graph.DroneNode;
 import com.assettracker.backend.graph.GraphService;
@@ -26,9 +30,11 @@ class AgentOrchestrationServiceTest {
 
     private final GraphService graph = Mockito.mock(GraphService.class);
     private final ObjectMapper mapper = new ObjectMapper();
-    private final ToolRegistry registry = new ToolRegistry(graph, new FormationService(), mapper);
+    private final ToolRegistry registry =
+        new ToolRegistry(graph, new FormationService(), new RestrictedZoneObstacles(graph), mapper);
     private final AgentOrchestrationService orchestrator = new AgentOrchestrationService(
-        new StubLlmClient(mapper), registry, new PlanExpander(new FormationService()), mapper);
+        new StubLlmClient(mapper), registry,
+        new PlanExpander(new FormationService(), new RestrictedZoneObstacles(graph)), mapper);
 
     @Test
     void twoPhaseSwarmPlanHasFormUpThenAdvance() {
@@ -220,5 +226,48 @@ class AgentOrchestrationServiceTest {
             assertThat(((PlanAction.UpsertSquadron) a).tempId()).isEqualTo("squad-1");
         });
         assertThat(plan.actions()).noneMatch(a -> a instanceof PlanAction.SetWaypoint);
+    }
+
+    /**
+     * Regression: a raw exception from llm.complete() itself (e.g. StubLlmClient's
+     * single-drone-avoid path throwing when plan_route has no result yet, or a transient
+     * AnthropicLlmClient API failure) must not escape planFromPrompt uncaught — PlanController
+     * has no handler for that and it would surface as a message-less 500. It should be retried
+     * like any other plan failure, and recover if a later attempt succeeds.
+     */
+    @Test
+    void recoversWhenLlmCompleteThrowsOnEarlierTurns() {
+        LlmClient flaky = new LlmClient() {
+            private int calls = 0;
+
+            @Override
+            public LlmResponse complete(LlmRequest request) {
+                calls++;
+                if (calls <= 2) {
+                    throw new IllegalStateException("simulated transient failure " + calls);
+                }
+                return LlmResponse.end("{\"planId\":\"p1\",\"rationale\":\"ok\",\"actions\":[]}");
+            }
+        };
+        AgentOrchestrationService flakyOrchestrator = new AgentOrchestrationService(
+            flaky, registry, new PlanExpander(new FormationService(), new RestrictedZoneObstacles(graph)), mapper);
+
+        ExecutionPlan plan = flakyOrchestrator.planFromPrompt("anything");
+
+        assertThat(plan.planId()).isEqualTo("p1");
+    }
+
+    @Test
+    void wrapsPersistentLlmCompleteFailureInsteadOfLettingItEscapeRaw() {
+        LlmClient alwaysFails = request -> {
+            throw new IllegalStateException("no clear detour around restricted zone 'zone-1'");
+        };
+        AgentOrchestrationService failingOrchestrator = new AgentOrchestrationService(
+            alwaysFails, registry, new PlanExpander(new FormationService(), new RestrictedZoneObstacles(graph)), mapper);
+
+        assertThat(org.assertj.core.api.Assertions.catchThrowable(
+            () -> failingOrchestrator.planFromPrompt("anything")))
+            .isInstanceOf(IllegalStateException.class)
+            .hasMessageContaining("no clear detour around restricted zone 'zone-1'");
     }
 }

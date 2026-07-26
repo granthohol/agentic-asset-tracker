@@ -19,9 +19,11 @@ import com.assettracker.backend.agent.formation.FormationType;
 import com.assettracker.backend.agent.plan.ExecutionPlan;
 import com.assettracker.backend.agent.plan.PlanAction;
 import com.assettracker.backend.agent.plan.PlanExpander;
+import com.assettracker.backend.agent.routing.RestrictedZoneObstacles;
 import com.assettracker.backend.command.CommandPublisher;
 import com.assettracker.backend.entity.EntityService;
 import com.assettracker.backend.graph.Affiliation;
+import com.assettracker.backend.graph.GraphService;
 import com.assettracker.backend.graph.GraphWriter;
 import com.assettracker.backend.graph.ObjectiveNode;
 import com.assettracker.backend.graph.TrackDomain;
@@ -41,9 +43,12 @@ class PlanExecutorTest {
     private final CommandPublisher commandPublisher = Mockito.mock(CommandPublisher.class);
     private final DroneService droneService = Mockito.mock(DroneService.class);
     private final EntityService entityService = Mockito.mock(EntityService.class);
-    private final PlanExpander planExpander = new PlanExpander(new FormationService());
+    private final GraphService graphService = Mockito.mock(GraphService.class);
+    private final PlanExpander planExpander =
+        new PlanExpander(new FormationService(), new RestrictedZoneObstacles(graphService));
+    private final ObjectMapper mapper = new ObjectMapper();
     private final PlanExecutor executor = new PlanExecutor(
-        graphWriter, commandPublisher, droneService, entityService, planExpander, new ObjectMapper());
+        graphWriter, commandPublisher, droneService, entityService, planExpander, mapper);
 
     @Test
     void mintsTempIdAndResolvesItForLaterActions() {
@@ -250,5 +255,112 @@ class PlanExecutorTest {
         order.verify(commandPublisher).publishSetWaypoint("drone-000", 39.04, -77.185, "HOLD");
         order.verify(commandPublisher).publishSetWaypoint("drone-000", 39.05, -77.18, "ADVANCE");
         verify(droneService, Mockito.atLeastOnce()).getDrone("drone-000");
+    }
+
+    @Test
+    void waitsBetweenMultipleDistinctHoldLegsNotJustHoldAndAdvance() {
+        // Regression: PlanExpander numbers multi-detour HOLD legs (HOLD_1, HOLD_2, ...) so this
+        // wave-grouping loop's contiguous-same-mission_type check can't merge two geometrically
+        // different detour legs into one wave (which used to publish leg 2's coordinates as an
+        // immediate same-wave overwrite of leg 1 for every drone, then wait forever for a leg-1
+        // arrival that would never happen). This locks in that HOLD_1 gates HOLD_2 exactly like
+        // FORM_UP gates HOLD_1 and HOLD_2 gates ADVANCE — three separate waits, not one.
+        when(droneService.getDrone("drone-000")).thenReturn(
+            new Drone("drone-000", 39.03, -77.18, 80, DroneStatus.ACTIVE),
+            new Drone("drone-000", 38.99, -77.30, 80, DroneStatus.ACTIVE),
+            new Drone("drone-000", 39.00, -77.25, 80, DroneStatus.ACTIVE)
+        );
+
+        ExecutionPlan plan = new ExecutionPlan("plan-multi-hold", "r", List.of(
+            new PlanAction.SetWaypoint("drone-000", 39.03, -77.18, "FORM_UP"),
+            new PlanAction.SetWaypoint("drone-000", 38.99, -77.30, "HOLD_1"),
+            new PlanAction.SetWaypoint("drone-000", 39.00, -77.25, "HOLD_2"),
+            new PlanAction.SetWaypoint("drone-000", 39.05, -77.18, "ADVANCE")
+        ));
+
+        executor.execute(plan);
+
+        InOrder order = Mockito.inOrder(commandPublisher);
+        order.verify(commandPublisher).publishSetWaypoint("drone-000", 39.03, -77.18, "FORM_UP");
+        order.verify(commandPublisher).publishSetWaypoint("drone-000", 38.99, -77.30, "HOLD_1");
+        order.verify(commandPublisher).publishSetWaypoint("drone-000", 39.00, -77.25, "HOLD_2");
+        order.verify(commandPublisher).publishSetWaypoint("drone-000", 39.05, -77.18, "ADVANCE");
+        verify(commandPublisher, times(4)).publishSetWaypoint(
+            Mockito.anyString(), Mockito.anyDouble(), Mockito.anyDouble(), Mockito.any());
+        // One arrival check per wave transition (FORM_UP->HOLD_1, HOLD_1->HOLD_2, HOLD_2->ADVANCE).
+        // If HOLD_1/HOLD_2 had collided on a shared mission_type, this would only be 2.
+        verify(droneService, times(3)).getDrone("drone-000");
+    }
+
+    /**
+     * Regression: execute() can block for minutes waiting on wave arrivals (up to
+     * WAVE_TIMEOUT_MS per wave). Running that directly on the Kafka listener thread would stop
+     * it calling poll(), which risks exceeding max.poll.interval.ms mid-mission — the broker
+     * revokes the partition, and once poll() resumes this same not-yet-committed message gets
+     * redelivered, silently re-running the whole plan from FORM_UP while drones are already
+     * mid-mission or already at the destination (looks exactly like "drones went back to start
+     * partway through, then corrected"). onPlanEnvelope must hand execute() off to a worker
+     * thread and return immediately regardless of how long the plan takes to run.
+     */
+    @Test
+    void onPlanEnvelopeReturnsImmediatelyEvenThoughExecuteWouldBlock() throws Exception {
+        // getDrone is slow (simulating a wave that takes a while to arrive) but eventually
+        // reports the drone at FORM_UP's target, so the background execution finishes quickly
+        // enough for the test to observe the second wave without waiting out the real 90s timeout.
+        when(droneService.getDrone("drone-000")).thenAnswer(inv -> {
+            Thread.sleep(300);
+            return new Drone("drone-000", 39.03, -77.18, 80, DroneStatus.ACTIVE);
+        });
+
+        ExecutionPlan plan = new ExecutionPlan("plan-async", "r", List.of(
+            new PlanAction.SetWaypoint("drone-000", 39.03, -77.18, "FORM_UP"),
+            new PlanAction.SetWaypoint("drone-000", 39.05, -77.18, "ADVANCE")
+        ));
+        String json = mapper.writeValueAsString(new PlanEnvelope(0L, plan));
+
+        long start = System.currentTimeMillis();
+        executor.onPlanEnvelope(json);
+        long elapsedMs = System.currentTimeMillis() - start;
+
+        assertThat(elapsedMs)
+            .as("onPlanEnvelope must not block on execute()'s wave waits")
+            .isLessThan(200);
+
+        awaitPublishCount(2, 2000);
+        InOrder order = Mockito.inOrder(commandPublisher);
+        order.verify(commandPublisher).publishSetWaypoint("drone-000", 39.03, -77.18, "FORM_UP");
+        order.verify(commandPublisher).publishSetWaypoint("drone-000", 39.05, -77.18, "ADVANCE");
+    }
+
+    @Test
+    void onPlanEnvelopeSkipsARedeliveredDuplicateOfTheSamePlanId() throws Exception {
+        when(droneService.getDrone("drone-000")).thenReturn(
+            new Drone("drone-000", 39.03, -77.18, 80, DroneStatus.ACTIVE)
+        );
+
+        ExecutionPlan plan = new ExecutionPlan("plan-dup", "r", List.of(
+            new PlanAction.SetWaypoint("drone-000", 39.03, -77.18, "FORM_UP")
+        ));
+        String json = mapper.writeValueAsString(new PlanEnvelope(0L, plan));
+
+        executor.onPlanEnvelope(json);
+        executor.onPlanEnvelope(json); // redelivery of the same message/planId
+
+        awaitPublishCount(1, 2000);
+        // Give a would-be second execution a moment to (wrongly) fire before asserting it didn't.
+        Thread.sleep(300);
+        verify(commandPublisher, times(1)).publishSetWaypoint(
+            Mockito.anyString(), Mockito.anyDouble(), Mockito.anyDouble(), Mockito.any());
+    }
+
+    private void awaitPublishCount(int expected, long timeoutMs) throws InterruptedException {
+        long deadline = System.currentTimeMillis() + timeoutMs;
+        while (System.currentTimeMillis() < deadline) {
+            int count = Mockito.mockingDetails(commandPublisher).getInvocations().size();
+            if (count >= expected) {
+                return;
+            }
+            Thread.sleep(50);
+        }
     }
 }

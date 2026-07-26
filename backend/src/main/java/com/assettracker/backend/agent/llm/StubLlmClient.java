@@ -98,7 +98,7 @@ public class StubLlmClient implements LlmClient {
 
         if (droneIds.isEmpty()) {
             ExecutionPlan plan = buildStubPlan(
-                firstIdFromTool(request, "list_squadrons"), userCommand, aoi, type, droneIds, null, null, null);
+                firstIdFromTool(request, "list_squadrons"), userCommand, aoi, type, droneIds, null, null);
             return end(plan);
         }
 
@@ -140,48 +140,14 @@ public class StubLlmClient implements LlmClient {
             summary, "formUpCenter", new double[] { aoi[0] - 0.018, aoi[1] });
         double[] advance = centerFromSummary(summary, "advanceCenter", aoi);
 
-        // Swarm avoid: route the ACTUAL FORM_UP point (named rally, else leader's current
-        // position) → ADVANCE, so the detour spine matches the leg the swarm will really fly.
-        // A computed standoff center (previewFormUp) is a poor route origin — it's often
-        // on/inside the no-fly itself — so fall back to the leader's live position only when
-        // no rally was named.
-        if (avoid && planRouteCount == 0) {
-            double[] from;
-            if (namedFormUp != null) {
-                from = namedFormUp;
-            } else {
-                from = droneLatLng(request, droneIds.get(0));
-                if (from == null) {
-                    from = previewFormUp;
-                }
-            }
-            return LlmResponse.toolUse(
-                "Routing the swarm approach around restricted circles.",
-                List.of(new ToolCall(
-                    "call_plan_route",
-                    "plan_route",
-                    planRouteArgs(from[0], from[1], advance[0], advance[1])
-                ))
-            );
-        }
-
-        JsonNode route = null;
-        if (planRouteCount > 0) {
-            route = requireSuccessfulRoute(allToolContents(request, "plan_route").get(0));
-        }
-
-        double[] formUp;
-        if (namedFormUp != null) {
-            formUp = namedFormUp;
-        } else if (avoid && route != null && !route.path("direct").asBoolean(true)) {
-            // First detour waypoint becomes the form-up center (clear of the circle).
-            formUp = firstIntermediateOr(route, previewFormUp);
-        } else {
-            formUp = previewFormUp;
-        }
+        // The named rally always wins over the computed standoff. Avoidance itself is no longer
+        // this class's job for swarms: buildStubPlan emits a single applyFormationRoute action
+        // and the backend (PlanExpander + ZoneRouter) computes the FORM_UP -> HOLD* -> ADVANCE
+        // route deterministically, guaranteeing every wave carries the full swarm.
+        double[] formUp = namedFormUp != null ? namedFormUp : previewFormUp;
 
         ExecutionPlan plan = buildStubPlan(
-            firstIdFromTool(request, "list_squadrons"), userCommand, aoi, type, droneIds, formUp, advance, route);
+            firstIdFromTool(request, "list_squadrons"), userCommand, aoi, type, droneIds, formUp, advance);
         return end(plan);
     }
 
@@ -249,8 +215,9 @@ public class StubLlmClient implements LlmClient {
     }
 
     /**
-     * Stub plan: objective + deploy, plus applyFormation waves when drones are selected.
-     * When {@code route} has detour legs, inserts HOLD formations at intermediate centers.
+     * Stub plan: objective + deploy, plus a single applyFormationRoute macro when drones are
+     * selected. The backend expands that macro into FORM_UP -> HOLD* -> ADVANCE waves, routing
+     * around restricted zones itself — this class no longer computes or previews that route.
      */
     private ExecutionPlan buildStubPlan(
         String squadronId,
@@ -259,8 +226,7 @@ public class StubLlmClient implements LlmClient {
         FormationType type,
         List<String> droneIds,
         double[] formUpCenter,
-        double[] advanceCenter,
-        JsonNode route
+        double[] advanceCenter
     ) {
         List<PlanAction> actions = new ArrayList<>();
         double aoiLat = aoi[0];
@@ -282,29 +248,13 @@ public class StubLlmClient implements LlmClient {
         if (droneIds == null || droneIds.isEmpty() || formUpCenter == null || advanceCenter == null) {
             rationale = "Stub plan for: \"" + cmd + "\". Creates an objective and deploys assets to it.";
         } else {
-            double faceLat = aoiLat + (aoiLat - formUpCenter[0]);
-            double faceLng = aoiLng + (aoiLng - formUpCenter[1]);
-            actions.add(new PlanAction.ApplyFormation(
-                type, formUpCenter[0], formUpCenter[1], droneIds, "FORM_UP", null, aoiLat, aoiLng));
-
-            List<double[]> intermediates = intermediateCenters(route, advanceCenter);
-            for (double[] hold : intermediates) {
-                // Skip HOLD that duplicates the FORM_UP center (common when form-up is the first detour).
-                if (Math.abs(hold[0] - formUpCenter[0]) < 1e-5
-                    && Math.abs(hold[1] - formUpCenter[1]) < 1e-5) {
-                    continue;
-                }
-                actions.add(new PlanAction.ApplyFormation(
-                    type, hold[0], hold[1], droneIds, "HOLD", null, aoiLat, aoiLng));
-            }
-
-            actions.add(new PlanAction.ApplyFormation(
-                type, advanceCenter[0], advanceCenter[1], droneIds, "ADVANCE", null, faceLat, faceLng));
+            actions.add(new PlanAction.ApplyFormationRoute(
+                type, droneIds, formUpCenter[0], formUpCenter[1],
+                advanceCenter[0], advanceCenter[1], "ADVANCE", null));
             rationale = "Stub plan for: \"" + cmd + "\". " + type
                 + ": form up under leader " + droneIds.get(0)
-                + " (" + droneIds.size() + " drones)"
-                + (intermediates.isEmpty() ? "" : ", " + intermediates.size() + " HOLD detour(s)")
-                + ", then ADVANCE on the disturbance.";
+                + " (" + droneIds.size() + " drones) at the rally, then advance on the objective"
+                + " (auto-routed around any restricted zones).";
         }
         return new ExecutionPlan("plan-" + UUID.randomUUID(), rationale, actions);
     }
@@ -327,49 +277,6 @@ public class StubLlmClient implements LlmClient {
             legs.add(List.of(toLat, toLng));
         }
         return legs;
-    }
-
-    /**
-     * Intermediate centers for swarm HOLD waves: plan_route legs except the final destination.
-     * When FORM_UP already sits on the first detour, skip that leg so we do not HOLD in place.
-     */
-    private static List<double[]> intermediateCenters(JsonNode route, double[] advanceCenter) {
-        List<double[]> out = new ArrayList<>();
-        if (route == null || routeHasError(route) || !route.path("legs").isArray()) {
-            return out;
-        }
-        JsonNode legs = route.path("legs");
-        for (int i = 0; i < legs.size(); i++) {
-            JsonNode leg = legs.get(i);
-            if (!leg.hasNonNull("lat") || !leg.hasNonNull("lng")) {
-                continue;
-            }
-            double lat = leg.get("lat").asDouble();
-            double lng = leg.get("lng").asDouble();
-            if (i == legs.size() - 1) {
-                continue;
-            }
-            if (Math.abs(lat - advanceCenter[0]) < 1e-6 && Math.abs(lng - advanceCenter[1]) < 1e-6) {
-                continue;
-            }
-            out.add(new double[] { lat, lng });
-        }
-        return out;
-    }
-
-    private static double[] firstIntermediateOr(JsonNode route, double[] fallback) {
-        if (route == null || !route.path("legs").isArray() || route.path("legs").isEmpty()) {
-            return fallback;
-        }
-        JsonNode legs = route.path("legs");
-        if (legs.size() < 2) {
-            return fallback;
-        }
-        JsonNode first = legs.get(0);
-        if (first.hasNonNull("lat") && first.hasNonNull("lng")) {
-            return new double[] { first.get("lat").asDouble(), first.get("lng").asDouble() };
-        }
-        return fallback;
     }
 
     static JsonNode requireSuccessfulRoute(JsonNode route) {

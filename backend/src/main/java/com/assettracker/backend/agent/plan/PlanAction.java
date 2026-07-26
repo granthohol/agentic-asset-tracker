@@ -28,6 +28,7 @@ import com.fasterxml.jackson.annotation.JsonTypeInfo;
     @JsonSubTypes.Type(value = PlanAction.SetWaypoint.class, name = "setWaypoint"),
     @JsonSubTypes.Type(value = PlanAction.SetRoute.class, name = "setRoute"),
     @JsonSubTypes.Type(value = PlanAction.ApplyFormation.class, name = "applyFormation"),
+    @JsonSubTypes.Type(value = PlanAction.ApplyFormationRoute.class, name = "applyFormationRoute"),
     @JsonSubTypes.Type(value = PlanAction.ClearWaypoint.class, name = "clearWaypoint"),
     @JsonSubTypes.Type(value = PlanAction.UpsertTrack.class, name = "upsertTrack"),
     @JsonSubTypes.Type(value = PlanAction.UpsertWaypoint.class, name = "upsertWaypoint"),
@@ -117,6 +118,27 @@ public sealed interface PlanAction {
         Double spacingMeters,
         Double facingLat,
         Double facingLng
+    ) implements PlanAction {}
+
+    /**
+     * Two-phase swarm macro: form up at formUpLat/formUpLng, then move to destLat/destLng.
+     * Expands server-side (before this reaches PlanExecutor) into FORM_UP -> HOLD* -> ADVANCE
+     * setWaypoint waves, routing around every RESTRICTED CIRCLE zone between the two points.
+     * Every wave carries the full droneIds list, so the swarm always moves together — the
+     * planner never has to hand-compose per-wave applyFormation actions or invent detour
+     * coordinates itself. Prefer this over a bare applyFormation whenever a swarm has a
+     * distinct form-up point and a distinct destination.
+     */
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    record ApplyFormationRoute(
+        FormationType formationType,
+        List<String> droneIds,
+        double formUpLat,
+        double formUpLng,
+        double destLat,
+        double destLng,
+        @JsonProperty("mission_type") String missionType,
+        Double spacingMeters
     ) implements PlanAction {}
 
     /** Clear a drone's current waypoint (it resumes free movement). */

@@ -3,12 +3,18 @@ package com.assettracker.backend.execution;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.stereotype.Component;
+
+import jakarta.annotation.PreDestroy;
 
 import com.assettracker.backend.agent.plan.ExecutionPlan;
 import com.assettracker.backend.agent.plan.PlanAction;
@@ -53,6 +59,22 @@ public class PlanExecutor {
     private final PlanExpander planExpander;
     private final ObjectMapper mapper;
 
+    // execute() blocks (up to WAVE_TIMEOUT_MS per wave, so minutes for a multi-wave plan) waiting
+    // for drone arrivals. Running that directly on the Kafka listener thread would stop it from
+    // calling poll(), which risks exceeding max.poll.interval.ms mid-mission: the broker revokes
+    // the partition, and once poll() resumes this same not-yet-committed message gets redelivered
+    // — silently re-running the whole plan from FORM_UP while drones are already mid-mission or
+    // already done. Handing off to a worker thread keeps the listener thread free to keep polling
+    // so that can't happen. executedPlanIds is a belt-and-suspenders guard against any other
+    // redelivery path (crash before commit, at-least-once delivery in general) re-running a plan
+    // that already started.
+    private final ExecutorService worker = Executors.newSingleThreadExecutor(r -> {
+        Thread t = new Thread(r, "plan-executor-worker");
+        t.setDaemon(true);
+        return t;
+    });
+    private final Set<String> executedPlanIds = ConcurrentHashMap.newKeySet();
+
     public PlanExecutor(
         GraphWriter graphWriter,
         CommandPublisher commandPublisher,
@@ -82,14 +104,32 @@ public class PlanExecutor {
             log.error("Discarding malformed plan envelope: {}", e.getMessage());
             return;
         }
-        execute(envelope.plan());
+        String planId = envelope.plan().planId();
+        if (!executedPlanIds.add(planId)) {
+            log.warn("Plan {} already started — discarding duplicate delivery", planId);
+            return;
+        }
+        // Return immediately; execute() runs on the worker thread so this listener thread stays
+        // free to keep polling Kafka. See the field comment on `worker` for why that matters.
+        worker.submit(() -> execute(envelope.plan()));
+    }
+
+    @PreDestroy
+    void shutdown() {
+        worker.shutdownNow();
     }
 
     /** Walk actions in order. Fail-fast on first error. */
     void execute(ExecutionPlan plan) {
         ExecutionContext ctx = new ExecutionContext(plan.planId());
         // Defensive expand (+ FORM_UP-before-ADVANCE): orchestrator already does this.
-        List<PlanAction> actions = planExpander.expandActions(plan.actions());
+        List<PlanAction> actions;
+        try {
+            actions = planExpander.expandActions(plan.actions());
+        } catch (Exception e) {
+            log.error("Plan {} failed to expand, aborting: {}", plan.planId(), e.getMessage());
+            return;
+        }
         log.info("Executing plan {} ({} action(s))", plan.planId(), actions.size());
 
         List<ArrivalTarget> previousWave = null;
@@ -203,6 +243,8 @@ public class PlanExecutor {
                 throw new IllegalStateException("setRoute must be handled by executeSetRoute");
             case PlanAction.ApplyFormation a ->
                 throw new IllegalStateException("applyFormation must be expanded before dispatch");
+            case PlanAction.ApplyFormationRoute a ->
+                throw new IllegalStateException("applyFormationRoute must be expanded before dispatch");
             case PlanAction.ClearWaypoint a -> {
                 graphWriter.clearDroneWaypoint(a.droneId());
                 commandPublisher.publishClearWaypoint(a.droneId());
@@ -283,11 +325,6 @@ public class PlanExecutor {
             return "";
         }
         return missionType.trim().toUpperCase();
-    }
-
-    static boolean isFormUp(String missionType) {
-        String m = normalizeMission(missionType);
-        return "FORM_UP".equals(m) || "HOLD".equals(m);
     }
 
     private String resolveUpsertId(String id, String tempId, String label, ExecutionContext ctx) {

@@ -111,7 +111,20 @@ function App() {
   useEntityFeed();
 
   const [pendingPlan, setPendingPlan] = useState<ExecutionPlan | null>(null);
-  const [acceptedRoutes, setAcceptedRoutes] = useState<AcceptedRoute[]>([]);
+  // The current wave + everything queued behind it live in ONE state object, updated
+  // atomically. This used to be `acceptedRoutes` state plus a `remainingWavesRef` ref that the
+  // setAcceptedRoutes updater mutated as a side effect — an impure updater. React StrictMode
+  // deliberately invokes updater functions twice in development specifically to catch that: the
+  // second call saw the ref already drained by the first, popped an extra wave, and could empty
+  // the queue a full wave early — which then satisfied the "mission complete" effect below and
+  // fired an unwanted cancelMission (CLEAR_WAYPOINT) while the backend was still correctly
+  // mid-mission. Keeping both pieces in one useState with a pure updater removes the ref
+  // mutation entirely, so double-invocation is a no-op (both calls return the same result).
+  const [waveState, setWaveState] = useState<{ current: AcceptedRoute[]; remaining: AcceptedRoute[][] }>({
+    current: [],
+    remaining: [],
+  });
+  const acceptedRoutes = waveState.current;
   /** AOI circles stick around until the mission routes finish. */
   const [activeObjectives, setActiveObjectives] = useState<MissionObjective[]>([]);
   const [missionCard, setMissionCard] = useState<MissionCard | null>(null);
@@ -124,8 +137,6 @@ function App() {
   const appRef = useRef<HTMLDivElement>(null);
   /** Kept so we can clear drones when the last wave finishes. */
   const approvedPlanRef = useRef<ExecutionPlan | null>(null);
-  /** Remaining overlay waves after the current acceptedRoutes wave. */
-  const remainingWavesRef = useRef<AcceptedRoute[][]>([]);
 
   const flash = (t: Toast) => {
     setToast(t);
@@ -134,8 +145,7 @@ function App() {
 
   const clearMissionUi = () => {
     approvedPlanRef.current = null;
-    remainingWavesRef.current = [];
-    setAcceptedRoutes([]);
+    setWaveState({ current: [], remaining: [] });
     setActiveObjectives([]);
     setPendingPlan(null);
     setMissionCard(null);
@@ -171,8 +181,7 @@ function App() {
       await executePlan(plan);
       approvedPlanRef.current = plan;
       const waves = routeWavesFromPlan(plan);
-      remainingWavesRef.current = waves.slice(1);
-      setAcceptedRoutes(waves[0] ?? []);
+      setWaveState({ current: waves[0] ?? [], remaining: waves.slice(1) });
       setActiveObjectives(objectivesFromPlan(plan));
       setPendingPlan(null);
       setMissionCard((prev) => (prev ? { ...prev, status: 'running' } : null));
@@ -210,23 +219,24 @@ function App() {
     if (completedIds.length === 0) return;
     const done = new Set(completedIds);
 
-    setAcceptedRoutes((prev) => {
-      const remaining = prev.filter((route) => !done.has(route.id));
+    // Pure: derives the next { current, remaining } entirely from prev, no outside mutation.
+    // Safe under StrictMode's double-invoke (both calls see the same prev, same result).
+    setWaveState((prev) => {
+      const remainingCurrent = prev.current.filter((route) => !done.has(route.id));
       // Whole current wave done → swap in the next wave (HOLD / TRANSIT / ADVANCE / …).
-      if (remaining.length === 0 && remainingWavesRef.current.length > 0) {
-        const [next, ...rest] = remainingWavesRef.current;
-        remainingWavesRef.current = rest;
-        return next;
+      if (remainingCurrent.length === 0 && prev.remaining.length > 0) {
+        const [next, ...rest] = prev.remaining;
+        return { current: next, remaining: rest };
       }
-      return remaining;
+      return { ...prev, current: remainingCurrent };
     });
   }, []);
 
   // Mission done: clear AOI + puck, send CLEAR_WAYPOINT so drones roam again.
   useEffect(() => {
     if (
-      acceptedRoutes.length === 0
-      && remainingWavesRef.current.length === 0
+      waveState.current.length === 0
+      && waveState.remaining.length === 0
       && !pendingPlan
       && missionCard?.status === 'running'
     ) {
@@ -242,7 +252,7 @@ function App() {
         }
       }
     }
-  }, [acceptedRoutes.length, pendingPlan, missionCard?.status]);
+  }, [waveState, pendingPlan, missionCard?.status]);
 
   const onResizePointerDown = useCallback((e: ReactPointerEvent<HTMLDivElement>) => {
     e.preventDefault();

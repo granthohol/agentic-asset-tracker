@@ -2,6 +2,8 @@ package com.assettracker.backend.controller;
 
 import java.util.List;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -29,6 +31,8 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 @RequestMapping("/api")
 public class PlanController {
 
+    private static final Logger log = LoggerFactory.getLogger(PlanController.class);
+
     private final AgentOrchestrationService orchestrator;
     private final PlanValidator planValidator;
     private final PlanPublisher planPublisher;
@@ -54,9 +58,15 @@ public class PlanController {
     public record CancelMissionRequest(List<String> droneIds) {}
 
     @PostMapping(value = "/plan", produces = MediaType.APPLICATION_JSON_VALUE)
-    public String plan(@RequestBody PlanRequest request) {
-        ExecutionPlan plan = orchestrator.planFromPrompt(request.command());
-        return serialize(plan);
+    public ResponseEntity<String> plan(@RequestBody PlanRequest request) {
+        ExecutionPlan plan;
+        try {
+            plan = orchestrator.planFromPrompt(request.command());
+        } catch (Exception e) {
+            log.warn("Planning failed for command \"{}\": {}", request.command(), e.getMessage());
+            return ResponseEntity.internalServerError().body(errorJson("PLANNING_FAILED", e.getMessage()));
+        }
+        return ResponseEntity.ok(serialize(plan));
     }
 
     /** Parse the raw plan JSON from /api/plan, validate, enqueue. */
@@ -99,8 +109,12 @@ public class PlanController {
     }
 
     private String errorJson(String message) {
+        return errorJson("REJECTED", message);
+    }
+
+    private String errorJson(String status, String message) {
         ObjectNode err = mapper.createObjectNode();
-        err.put("status", "REJECTED");
+        err.put("status", status);
         err.put("error", message);
         return err.toString();
     }

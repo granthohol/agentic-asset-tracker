@@ -56,31 +56,33 @@ public class AgentOrchestrationService {
         preview_two_phase(formationType, droneIds, aoiLat, aoiLng) ONCE with that ADVANCE AOI. It
         returns { formationType, droneCount, formUpCenter{lat,lng}, advanceCenter{lat,lng} }.
 
-        FORM_UP center: if the operator names a distinct form-up / rally location (a map waypoint
+        FORM_UP point: if the operator names a distinct form-up / rally location (a map waypoint
         from list_waypoints, e.g. "form at Rally, then go to Red Track 1"), use THAT waypoint's
-        lat/lng as the FORM_UP applyFormation center — do NOT use preview_two_phase's formUpCenter
-        (that standoff is only for when no rally point is named). Always emit FORM_UP before ADVANCE.
-        Emit TWO applyFormation actions (do NOT emit per-drone setWaypoint for swarms): first at the
-        FORM_UP center with mission_type FORM_UP and facingLat/facingLng set to the AOI; then at
-        advanceCenter with mission_type ADVANCE. The backend expands each applyFormation into
-        per-drone waypoints.
+        lat/lng as formUpLat/formUpLng — do NOT use preview_two_phase's formUpCenter (that standoff
+        is only for when no rally point is named).
 
-        Avoiding restricted / no-fly zones:
-          1. Call list_zones, then plan_route(fromLat, fromLng, toLat, toLng). It returns
-             { legs:[{lat,lng},...], avoidedZoneIds, direct } or { error }. Only RESTRICTED CIRCLE zones
-             are avoided. NEVER use a RESTRICTED zone's center as the destination AOI — resolve the
-             destination from a track, PATROL zone, waypoint, or explicit lat/lng first.
+        Swarm formation + motion: emit exactly ONE applyFormationRoute action per swarm move (do
+        NOT emit setWaypoint or multiple applyFormation actions for a swarm):
+          { op: "applyFormationRoute", formationType, droneIds, formUpLat, formUpLng, destLat,
+            destLng, mission_type?, spacingMeters? }
+        destLat/destLng is advanceCenter (or the resolved AOI). The backend forms the swarm up at
+        formUpLat/formUpLng, then — server-side, deterministically — routes it to the destination
+        around every RESTRICTED CIRCLE zone in between (inserting HOLD waves at detour points as
+        needed) before the final ADVANCE. Every wave always carries the full droneIds list. You
+        never call plan_route or invent detour coordinates for a swarm; the backend guarantees the
+        avoidance and that the whole swarm moves together at each phase. NEVER use a RESTRICTED
+        zone's center as the destination — resolve it from a track, PATROL zone, waypoint, or
+        explicit lat/lng first. A single-phase formation move with no distinct form-up point (e.g.
+        "form a ring around Red Track 1", nothing to avoid) may use a plain applyFormation instead.
+
+        Single drone, no formation — resolve avoidance yourself:
+          1. Call plan_route(fromLat, fromLng, toLat, toLng). It returns
+             { legs:[{lat,lng},...], avoidedZoneIds, direct } or { error }. Only RESTRICTED CIRCLE
+             zones are avoided.
           2. If plan_route returns { error }, do NOT emit a straight-line plan; pick a destination
              outside every RESTRICTED circle and call plan_route again.
-          3. Single drone: emit setRoute { droneId, legs: [[lat,lng],...], mission_type } using plan_route
-             legs (do NOT invent detour coords; do NOT flatten to concurrent setWaypoints).
-          4. Swarm: if the operator named a rally/FORM_UP waypoint, plan_route(that waypoint's
-             lat/lng -> advanceCenter) — that is the leg the swarm actually flies, so it is the one
-             that must be checked against the no-fly. Otherwise plan_route(leader current position ->
-             advanceCenter), not formUp->advance (the computed standoff center often sits on the
-             no-fly itself). If direct, keep two applyFormation actions. If detour legs exist,
-             FORM_UP at the named rally (or the first detour leg if none was named), HOLD at later
-             intermediate legs, ADVANCE at advanceCenter.
+          3. Emit setRoute { droneId, legs: [[lat,lng],...], mission_type } using plan_route legs
+             verbatim (do NOT invent detour coords; do NOT flatten to concurrent setWaypoints).
 
         When done, output ONE JSON object ExecutionPlan:
           { "planId": string, "rationale": string, "actions": PlanAction[] }
@@ -95,6 +97,7 @@ public class AgentOrchestrationService {
           - setWaypoint:                { op, droneId, targetLat, targetLng, mission_type? }
           - setRoute:                   { op, droneId, legs: [[lat,lng],...], mission_type? }
           - applyFormation:             { op, formationType, centerLat, centerLng, droneIds, mission_type?, spacingMeters?, facingLat?, facingLng? }
+          - applyFormationRoute:        { op, formationType, droneIds, formUpLat, formUpLng, destLat, destLng, mission_type?, spacingMeters? }
           - clearWaypoint:              { op, droneId }
           - upsertTrack:                { op, id? | tempId?, name, affiliation, domain, latitude, longitude }
           - upsertWaypoint:             { op, id? | tempId?, name, latitude, longitude }
@@ -132,7 +135,24 @@ public class AgentOrchestrationService {
         int planRetries = 0;
 
         for (int turn = 0; turn < MAX_TURNS; turn++) {
-            LlmResponse response = llm.complete(new LlmRequest(SYSTEM_PROMPT, messages, toolSpecs, MAX_TOKENS));
+            LlmResponse response;
+            try {
+                response = llm.complete(new LlmRequest(SYSTEM_PROMPT, messages, toolSpecs, MAX_TOKENS));
+            } catch (Exception e) {
+                // e.g. a swarm/route plan the model can't complete (no clear detour, a rally
+                // point inside a restricted zone), or a transient LLM/API failure. Either way
+                // this must not escape as a raw exception — planController has no handler for
+                // this call and it would otherwise surface as a message-less 500.
+                if (++planRetries > MAX_PLAN_RETRIES) {
+                    throw new IllegalStateException(
+                        "LLM failed to produce a valid ExecutionPlan after " + MAX_PLAN_RETRIES + " retries: " + e.getMessage(), e);
+                }
+                log.warn("LLM call failed (retry {}/{}): {}", planRetries, MAX_PLAN_RETRIES, e.getMessage());
+                messages.add(LlmMessage.user(
+                    "The previous attempt failed (" + e.getMessage()
+                    + "). Try a different approach and return ONE JSON object matching the schema."));
+                continue;
+            }
 
             if (response.stopReason() == LlmResponse.StopReason.TOOL_USE) {
                 messages.add(LlmMessage.assistant(response.text(), response.toolCalls()));

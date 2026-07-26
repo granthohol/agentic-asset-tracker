@@ -12,13 +12,11 @@ import com.assettracker.backend.agent.formation.FormationPreview;
 import com.assettracker.backend.agent.formation.FormationService;
 import com.assettracker.backend.agent.formation.FormationType;
 import com.assettracker.backend.agent.routing.CircleObstacle;
+import com.assettracker.backend.agent.routing.RestrictedZoneObstacles;
 import com.assettracker.backend.agent.routing.RouteResult;
 import com.assettracker.backend.agent.routing.ZoneRouter;
 import com.assettracker.backend.graph.DroneNode;
 import com.assettracker.backend.graph.GraphService;
-import com.assettracker.backend.graph.ZoneNode;
-import com.assettracker.backend.graph.ZoneShape;
-import com.assettracker.backend.graph.ZoneType;
 import com.assettracker.backend.model.DroneStatus;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -36,12 +34,19 @@ public class ToolRegistry {
 
     private final GraphService graph;
     private final FormationService formations;
+    private final RestrictedZoneObstacles restrictedZones;
     private final ObjectMapper mapper;
     private final Map<String, Tool> tools = new LinkedHashMap<>();
 
-    public ToolRegistry(GraphService graph, FormationService formations, ObjectMapper mapper) {
+    public ToolRegistry(
+        GraphService graph,
+        FormationService formations,
+        RestrictedZoneObstacles restrictedZones,
+        ObjectMapper mapper
+    ) {
         this.graph = graph;
         this.formations = formations;
+        this.restrictedZones = restrictedZones;
         this.mapper = mapper;
         registerAll();
     }
@@ -400,18 +405,9 @@ public class ToolRegistry {
         double toLng = requireDouble(args, "toLng");
         List<String> zoneIds = optStringList(args, "zoneIds");
 
-        List<CircleObstacle> obstacles = new ArrayList<>();
-        if (zoneIds == null) {
-            for (ZoneNode z : graph.listZones()) {
-                toCircleObstacle(z).ifPresent(obstacles::add);
-            }
-        } else {
-            for (String id : zoneIds) {
-                ZoneNode z = graph.getZoneById(id)
-                    .orElseThrow(() -> new IllegalArgumentException("Unknown zone id: " + id));
-                toCircleObstacle(z).ifPresent(obstacles::add);
-            }
-        }
+        List<CircleObstacle> obstacles = zoneIds == null
+            ? restrictedZones.all()
+            : restrictedZones.byIds(zoneIds);
 
         RouteResult route = ZoneRouter.plan(fromLat, fromLng, toLat, toLng, obstacles);
         ObjectNode out = mapper.createObjectNode();
@@ -427,17 +423,6 @@ public class ToolRegistry {
         }
         out.put("direct", route.direct());
         return out;
-    }
-
-    private static java.util.Optional<CircleObstacle> toCircleObstacle(ZoneNode z) {
-        if (z.type() != ZoneType.RESTRICTED || z.shape() != ZoneShape.CIRCLE) {
-            return java.util.Optional.empty();
-        }
-        if (z.centerLatitude() == null || z.centerLongitude() == null || z.radiusMeters() == null) {
-            return java.util.Optional.empty();
-        }
-        return java.util.Optional.of(new CircleObstacle(
-            z.id(), z.centerLatitude(), z.centerLongitude(), z.radiusMeters()));
     }
 
     private List<String> optStringList(JsonNode args, String key) {

@@ -34,8 +34,8 @@ CENTER_LON = -77.2
 
 # Motion is time-based (deg/sec), not per-tick, so 1 Hz and 20 Hz look the same.
 # Roaming drones curve gently; commanded ones steer toward a waypoint.
-ROAM_SPEED_DEG_PER_S = 0.004
-STEER_SPEED_DEG_PER_S = 0.0025
+ROAM_SPEED_DEG_PER_S = 0.008
+STEER_SPEED_DEG_PER_S = 0.005
 # Turn rate mean-reverts with random acceleration for smooth arcs, not per-tick wobble.
 TURN_NOISE_RAD_PER_S = 0.6
 TURN_DAMP_PER_S = 0.8

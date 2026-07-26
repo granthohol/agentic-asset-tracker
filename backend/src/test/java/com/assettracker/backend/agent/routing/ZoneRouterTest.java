@@ -106,4 +106,44 @@ class ZoneRouterTest {
             prevLng = leg[1];
         }
     }
+
+    /**
+     * Regression: when from/to are both close to the circle and roughly opposite each other,
+     * every point sitting exactly on the buffer boundary is itself too close to the circle to
+     * see past it to the far end — pickDetour's original 14 boundary-only candidates (2 tangents
+     * from `from`, 12 rim samples) found nothing and threw "could not find a clear detour" even
+     * though a real path obviously exists (swing further out and go around). Verified empirically
+     * against this exact case before the fix (destination-side tangents + finer rim sampling +
+     * radius-expansion fallback in ZoneRouter.pickDetour): it failed 8 of 8 near-antipodal angle
+     * pairs around a 4 km circle; after the fix, 1190 angle-pair combinations at the same tight
+     * distance all succeeded.
+     */
+    @Test
+    void findsADetourWhenEndpointsAreCloseAndNearlyOppositeAcrossTheCircle() {
+        CircleObstacle c = new CircleObstacle("z", 39.000, -77.250, 4000);
+        double distDeg = 4400.0 / 111_320.0; // just outside the buffered circle
+        double fromLat = 39.000 + distDeg * Math.cos(Math.toRadians(10));
+        double fromLng = -77.250 + distDeg * Math.sin(Math.toRadians(10));
+        double toLat = 39.000 + distDeg * Math.cos(Math.toRadians(170));
+        double toLng = -77.250 + distDeg * Math.sin(Math.toRadians(170));
+
+        RouteResult r = ZoneRouter.plan(fromLat, fromLng, toLat, toLng, List.of(c));
+
+        assertThat(r.direct()).isFalse();
+        assertThat(r.avoidedZoneIds()).containsExactly("z");
+        double[] last = r.legs().get(r.legs().size() - 1);
+        assertThat(last[0]).isEqualTo(toLat);
+        assertThat(last[1]).isEqualTo(toLng);
+        for (int i = 0; i < r.legs().size() - 1; i++) {
+            double[] p = r.legs().get(i);
+            assertThat(ZoneRouter.pointInBufferedCircle(p[0], p[1], c)).isFalse();
+        }
+        double prevLat = fromLat;
+        double prevLng = fromLng;
+        for (double[] leg : r.legs()) {
+            assertThat(ZoneRouter.firstBlocking(prevLat, prevLng, leg[0], leg[1], List.of(c))).isNull();
+            prevLat = leg[0];
+            prevLng = leg[1];
+        }
+    }
 }

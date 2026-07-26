@@ -13,6 +13,7 @@ import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
 
 import com.assettracker.backend.agent.formation.FormationService;
+import com.assettracker.backend.agent.routing.RestrictedZoneObstacles;
 import com.assettracker.backend.graph.DroneDetail;
 import com.assettracker.backend.graph.DroneNode;
 import com.assettracker.backend.graph.GraphService;
@@ -30,7 +31,8 @@ class ToolRegistryTest {
 
     private final GraphService graph = Mockito.mock(GraphService.class);
     private final ObjectMapper mapper = new ObjectMapper();
-    private final ToolRegistry registry = new ToolRegistry(graph, new FormationService(), mapper);
+    private final ToolRegistry registry =
+        new ToolRegistry(graph, new FormationService(), new RestrictedZoneObstacles(graph), mapper);
 
     @Test
     void specsAreWellFormedAndCoverTheReadApi() {

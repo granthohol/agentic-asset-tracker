@@ -123,6 +123,24 @@ public class FormationService {
         return new FormationPreview(type, centerLat, centerLng, spacing, slots);
     }
 
+    /**
+     * Max straight-line distance (meters) from center to any slot in this formation. Rotation
+     * (facing) does not change this — it only rotates offsets, never their magnitude. Callers
+     * routing a formation's center around an obstacle should inflate the obstacle by this much
+     * so every slot (not just the center) keeps its clearance; see {@link
+     * com.assettracker.backend.agent.plan.PlanExpander}.
+     */
+    public double footprintRadiusMeters(FormationType type, int droneCount, Double spacingMeters) {
+        FormationSpec spec = specFor(type);
+        double spacing = spacingMeters != null ? spacingMeters : spec.defaultSpacingMeters();
+        int count = Math.min(Math.max(droneCount, 1), spec.maxDrones());
+        double maxDeg = 0.0;
+        for (double[] off : offsetsFor(type, count, spacing)) {
+            maxDeg = Math.max(maxDeg, Math.hypot(off[0], off[1]));
+        }
+        return maxDeg * METERS_PER_DEG;
+    }
+
     private FormationSpec specFor(FormationType type) {
         return CATALOG.stream()
             .filter(s -> s.type() == type)

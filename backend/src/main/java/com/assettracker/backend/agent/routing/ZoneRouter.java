@@ -16,8 +16,16 @@ public final class ZoneRouter {
     public static final double BUFFER_METERS = 200.0;
     private static final double METERS_PER_DEG = 111_320.0;
     private static final int MAX_ITERATIONS = 12;
-    /** Rim samples when both primary tangents are blocked. */
-    private static final int RIM_SAMPLES = 12;
+    /** Rim samples when the tangent candidates are blocked. */
+    private static final int RIM_SAMPLES = 36;
+    /**
+     * Detour-circle radius multipliers to retry at when nothing on the buffer boundary works.
+     * When from/to are both close to the circle and roughly opposite each other, every point
+     * sitting exactly on the buffer boundary is itself too close to the circle to see both ends
+     * without re-crossing it — swinging the candidate ring further out gives it room to arc
+     * around instead.
+     */
+    private static final double[] DETOUR_RADIUS_SCALES = { 1.0, 1.5, 2.5, 4.0 };
 
     private ZoneRouter() {}
 
@@ -150,9 +158,16 @@ public final class ZoneRouter {
     }
 
     /**
-     * External-tangent rim points left/right of the circle; prefer a clear from→detour segment.
-     * Prefer clearing every obstacle; if multi-circle clutter blocks that, accept a point that at
-     * least clears the current blocker (the next iteration handles the rest).
+     * External-tangent rim points left/right of the circle, computed from BOTH endpoints, plus
+     * dense rim samples; prefer a clear from→detour→destination path. Tangent points from
+     * {@code from} guarantee from→p is clear by construction; tangent points from {@code to}
+     * guarantee p→destination is clear the same way — combining both catches tight geometries
+     * (start and destination both close to the zone) where neither endpoint's tangent alone also
+     * has clear sight of the other end, and 12 rim samples at 30° apart could miss a narrow clear
+     * window entirely. If nothing on the buffer boundary works — from/to both close to the circle
+     * and roughly opposite each other, so every boundary point is itself too close to see past
+     * the circle to the far end — retry with the candidate ring swung progressively further out
+     * ({@link #DETOUR_RADIUS_SCALES}) before giving up.
      */
     static double[] pickDetour(
         double fromLat, double fromLng,
@@ -160,10 +175,30 @@ public final class ZoneRouter {
         CircleObstacle blocker,
         List<CircleObstacle> all
     ) {
-        double r = blocker.radiusMeters() + BUFFER_METERS;
+        double baseR = blocker.radiusMeters() + BUFFER_METERS;
+        for (double scale : DETOUR_RADIUS_SCALES) {
+            double[] found = pickDetourAtRadius(fromLat, fromLng, toLat, toLng, blocker, all, baseR * scale);
+            if (found != null) {
+                return found;
+            }
+        }
+        throw new IllegalArgumentException(
+            "could not find a clear detour around restricted zone '" + blocker.id() + "'");
+    }
+
+    /** One radius' worth of candidates; null if none clears both legs of the current blocker. */
+    private static double[] pickDetourAtRadius(
+        double fromLat, double fromLng,
+        double toLat, double toLng,
+        CircleObstacle blocker,
+        List<CircleObstacle> all,
+        double r
+    ) {
         List<double[]> candidates = new ArrayList<>();
         candidates.add(tangentPoint(fromLat, fromLng, blocker, r, true));
         candidates.add(tangentPoint(fromLat, fromLng, blocker, r, false));
+        candidates.add(tangentPoint(toLat, toLng, blocker, r, true));
+        candidates.add(tangentPoint(toLat, toLng, blocker, r, false));
         for (int i = 0; i < RIM_SAMPLES; i++) {
             candidates.add(rimPoint(blocker, r, (2.0 * Math.PI * i) / RIM_SAMPLES));
         }
@@ -196,10 +231,6 @@ public final class ZoneRouter {
                 bestCost = rank;
                 best = p;
             }
-        }
-        if (best == null) {
-            throw new IllegalArgumentException(
-                "could not find a clear detour around restricted zone '" + blocker.id() + "'");
         }
         return best;
     }

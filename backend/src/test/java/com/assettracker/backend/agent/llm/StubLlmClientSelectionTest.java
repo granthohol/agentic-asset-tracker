@@ -230,18 +230,16 @@ class StubLlmClientSelectionTest {
         } catch (Exception e) {
             throw new AssertionError(e);
         }
-        PlanAction.ApplyFormation formUp = (PlanAction.ApplyFormation) plan.actions().stream()
-            .filter(a -> a instanceof PlanAction.ApplyFormation af && "FORM_UP".equals(af.missionType()))
-            .findFirst().orElseThrow();
-        PlanAction.ApplyFormation advance = (PlanAction.ApplyFormation) plan.actions().stream()
-            .filter(a -> a instanceof PlanAction.ApplyFormation af && "ADVANCE".equals(af.missionType()))
+        PlanAction.ApplyFormationRoute route = (PlanAction.ApplyFormationRoute) plan.actions().stream()
+            .filter(a -> a instanceof PlanAction.ApplyFormationRoute)
             .findFirst().orElseThrow();
 
-        // FORM_UP at Rally — not the standoff near Red Track from preview_two_phase.
-        assertThat(formUp.centerLat()).isEqualTo(38.90);
-        assertThat(formUp.centerLng()).isEqualTo(-77.40);
-        assertThat(advance.centerLat()).isEqualTo(39.05);
-        assertThat(advance.centerLng()).isEqualTo(-77.18);
+        // FORM_UP at Rally — not the standoff near Red Track from preview_two_phase — and the
+        // destination is Red Track 1. The backend (PlanExpander) resolves the actual route.
+        assertThat(route.formUpLat()).isEqualTo(38.90);
+        assertThat(route.formUpLng()).isEqualTo(-77.40);
+        assertThat(route.destLat()).isEqualTo(39.05);
+        assertThat(route.destLng()).isEqualTo(-77.18);
     }
 
     @Test
@@ -282,7 +280,7 @@ class StubLlmClientSelectionTest {
     }
 
     @Test
-    void swarmAvoidWithNamedRallyRoutesFromRallyNotLeaderPosition() {
+    void swarmAvoidWithNamedRallyEmitsSingleFormationRouteFromRally() {
         // requestWith()'s fixture only has one drone, which would (correctly) take the
         // single-drone avoid path instead of the swarm path this test targets, so build the
         // fleet inline with enough drones to select a genuine swarm.
@@ -324,53 +322,25 @@ class StubLlmClientSelectionTest {
             new ToolResult("call_preview_two_phase", "preview_two_phase", summary, false))));
         LlmResponse step2 = stub.complete(new LlmRequest("system", messages, mapper.createArrayNode(), 2048));
 
-        assertThat(step2.stopReason()).isEqualTo(LlmResponse.StopReason.TOOL_USE);
-        assertThat(step2.toolCalls().get(0).name()).isEqualTo("plan_route");
-        // Regression: the route must originate at the named rally point, not the leader's raw
-        // starting position or the computed standoff center — otherwise the detour legs don't
-        // match the leg the swarm actually flies (Rally -> Red Track 1).
-        assertThat(step2.toolCalls().get(0).input().get("fromLat").asDouble()).isEqualTo(38.90);
-        assertThat(step2.toolCalls().get(0).input().get("fromLng").asDouble()).isEqualTo(-77.40);
-        assertThat(step2.toolCalls().get(0).input().get("toLat").asDouble()).isEqualTo(39.05);
-        assertThat(step2.toolCalls().get(0).input().get("toLng").asDouble()).isEqualTo(-77.18);
-
-        // Complete the loop: plan_route detours around the zone; the final plan should FORM_UP
-        // at Rally, HOLD at the detour leg, ADVANCE at Red Track 1.
-        ObjectNode route = mapper.createObjectNode();
-        ArrayNode legs = route.putArray("legs");
-        legs.addObject().put("lat", 38.95).put("lng", -77.35);
-        legs.addObject().put("lat", 39.05).put("lng", -77.18);
-        route.putArray("avoidedZoneIds").add("zone-1");
-        route.put("direct", false);
-
-        messages.add(LlmMessage.assistant(step2.text(), step2.toolCalls()));
-        messages.add(LlmMessage.toolResults(List.of(
-            new ToolResult("call_plan_route", "plan_route", route, false))));
-        LlmResponse step3 = stub.complete(new LlmRequest("system", messages, mapper.createArrayNode(), 2048));
-        assertThat(step3.stopReason()).isEqualTo(LlmResponse.StopReason.END);
-
+        // Regression: the stub no longer hand-composes a route (no plan_route call, no manual
+        // HOLD waves) — it emits ONE applyFormationRoute whose formUpLat/Lng is the named rally
+        // point (not the leader's raw starting position or the computed standoff center). The
+        // backend (PlanExpander) is solely responsible for the actual avoidance route, which
+        // guarantees every wave — FORM_UP, any HOLD, ADVANCE — carries the full swarm.
+        assertThat(step2.stopReason()).isEqualTo(LlmResponse.StopReason.END);
         ExecutionPlan plan;
         try {
-            plan = mapper.readValue(step3.text(), ExecutionPlan.class);
+            plan = mapper.readValue(step2.text(), ExecutionPlan.class);
         } catch (Exception e) {
             throw new AssertionError(e);
         }
-        List<PlanAction.ApplyFormation> formations = plan.actions().stream()
-            .filter(a -> a instanceof PlanAction.ApplyFormation)
-            .map(a -> (PlanAction.ApplyFormation) a)
-            .toList();
-        PlanAction.ApplyFormation formUp = formations.stream()
-            .filter(a -> "FORM_UP".equals(a.missionType())).findFirst().orElseThrow();
-        PlanAction.ApplyFormation hold = formations.stream()
-            .filter(a -> "HOLD".equals(a.missionType())).findFirst().orElseThrow();
-        PlanAction.ApplyFormation advance = formations.stream()
-            .filter(a -> "ADVANCE".equals(a.missionType())).findFirst().orElseThrow();
-
-        assertThat(formUp.centerLat()).isEqualTo(38.90);
-        assertThat(formUp.centerLng()).isEqualTo(-77.40);
-        assertThat(hold.centerLat()).isEqualTo(38.95);
-        assertThat(hold.centerLng()).isEqualTo(-77.35);
-        assertThat(advance.centerLat()).isEqualTo(39.05);
-        assertThat(advance.centerLng()).isEqualTo(-77.18);
+        PlanAction.ApplyFormationRoute route = (PlanAction.ApplyFormationRoute) plan.actions().stream()
+            .filter(a -> a instanceof PlanAction.ApplyFormationRoute)
+            .findFirst().orElseThrow();
+        assertThat(route.droneIds()).hasSize(5);
+        assertThat(route.formUpLat()).isEqualTo(38.90);
+        assertThat(route.formUpLng()).isEqualTo(-77.40);
+        assertThat(route.destLat()).isEqualTo(39.05);
+        assertThat(route.destLng()).isEqualTo(-77.18);
     }
 }

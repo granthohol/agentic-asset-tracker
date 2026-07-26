@@ -73,9 +73,10 @@ export default function DroneMap({
     useEffect(() => {
         if (acceptedRoutes.length === 0 || drones.size === 0) return;
 
+        // HOLD_2, HOLD_3, ... (multi-detour legs; see PlanExpander) count as form-up too.
         const isFormUp = (m?: string) => {
             const t = (m ?? "").toUpperCase();
-            return t === "FORM_UP" || t === "HOLD";
+            return t === "FORM_UP" || t.startsWith("HOLD");
         };
 
         const formUps = acceptedRoutes.filter((r) => isFormUp(r.missionType));

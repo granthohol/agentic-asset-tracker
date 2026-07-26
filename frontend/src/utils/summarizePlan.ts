@@ -43,7 +43,9 @@ function inferMissionKind(plan: ExecutionPlan): string | null {
             }
         }
     }
-    if (types.has("FORM_UP") && types.has("HOLD") && types.has("ADVANCE")) {
+    // HOLD_2, HOLD_3, ... (multi-detour legs; see PlanExpander) count as HOLD too.
+    const hasHold = [...types].some((t) => t.startsWith("HOLD"));
+    if (types.has("FORM_UP") && hasHold && types.has("ADVANCE")) {
         return "Form up → Hold → Advance";
     }
     if (types.has("FORM_UP") && types.has("ADVANCE")) {
@@ -52,7 +54,7 @@ function inferMissionKind(plan: ExecutionPlan): string | null {
     if (hasRoute) {
         return "Routed approach";
     }
-    if (types.has("FORM_UP") || types.has("HOLD")) {
+    if (types.has("FORM_UP") || hasHold) {
         return "Form up";
     }
     if (types.has("ADVANCE")) {
