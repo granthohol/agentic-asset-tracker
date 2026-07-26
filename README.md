@@ -9,42 +9,9 @@ So if you're a recruiter or engineer skimming this: the value isn't the app itse
 ---
 
 ## Demo
+
+Prompt: "Form up a drone swarm of 9 drones in wedge formation at waypoint `Rally`. Then, send the swarm to `Red Track 1`, all while avoiding the `Restricted Zone`"
 https://github.com/user-attachments/assets/4d5cdddf-99eb-4fc1-a05b-835dab2ef435
-
-<!-- Replace each placeholder with a GIF or short MP4 hosted on GitHub (drag into an issue/PR comment, copy URL) or link to a Loom/YouTube clip. Keep clips 15–45 seconds. -->
-
-- **Hero (put first)**
-  - Show: full screen map with ~50–100 drones roaming, side panel, mission phase chip
-  - Prompt: *"Fly 6 drones in a wedge to investigate the disturbance south of the fleet"* → accept plan → watch FORM_UP → HOLD → ADVANCE → COMPLETE
-- **Agent planning**
-  - Show: side panel only, then expand the plan puck
-  - Prompt: same as hero. Compact mission card → expand reasoning + grouped steps → Accept
-- **Tool grounding** (optional)
-  - Show: backend logs or a second terminal
-  - Prompt: same, with `LLM_PROVIDER=anthropic`. Watch tool calls (`list_drones` → `preview_two_phase`) before the plan lands.
-- **Map entities**
-  - Show: toolbar + inspector
-  - Do: place a hostile track, patrol zone, and waypoint. Drag one. Agent references a zone ("avoid the restricted zone, search the patrol area").
-- **Scale**
-  - Show: browser perf + optional backend logs
-  - Run: `python3 producer.py --drones 1000 --interval 0.05`
-- **Inspector**
-  - Show: click a drone mid-mission
-  - Drone inspector: id, battery, role, current waypoint. Drag to pin it.
-
-```markdown
-<!-- PASTE CLIPS HERE — example format:
-
-### Mission planning (30s)
-![plan-demo](https://user-images.githubusercontent.com/.../plan-demo.gif)
-
-### 1000-drone scale (20s)
-![scale-demo](https://user-images.githubusercontent.com/.../scale-demo.gif)
-
--->
-```
-
-**Recording tips:** 1920×1080 or 1440×900, dark UI reads well. Hide OS notifications. Use a single clean prompt per clip so the story is obvious without narration. If you add voiceover, 30 seconds is enough: "natural language in, human approves, executor fans out Kafka commands, drones form up then advance."
 
 ---
 
