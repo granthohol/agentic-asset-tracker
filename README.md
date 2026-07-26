@@ -11,6 +11,7 @@ So if you're a recruiter or engineer skimming this: the value isn't the app itse
 ## Demo
 
 Prompt: "Form up a drone swarm of 9 drones in wedge formation at waypoint `Rally`. Then, send the swarm to `Red Track 1`, all while avoiding the `Restricted Zone`"
+
 https://github.com/user-attachments/assets/4d5cdddf-99eb-4fc1-a05b-835dab2ef435
 
 ---
