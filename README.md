@@ -18,7 +18,7 @@ https://github.com/user-attachments/assets/4d5cdddf-99eb-4fc1-a05b-835dab2ef435
 
 ## What I Actually Built
 
-Most portfolio maps are CRUD with dots on them. This one is a small distributed system with a deliberate split between **read** and **write** paths:
+Most portfolio maps are CRUD with dots on them. This one is a small distributed system with a deliberate split between read and write paths:
 
 - **Edge**: Python simulator publishes telemetry and consumes motion commands
 - **Stream**: Kafka topics for telemetry, commands, and approved plans
@@ -96,7 +96,7 @@ flowchart TB
 
 ## Agent / AI Engineering
 
-This is the part I cared most about. The map and Kafka pipeline are fun infrastructure, but the agent layer is where most of the "AI engineering" (buzzword alert) decisions live: what the model can *see*, what it can *say*, and what it is physically prevented from *doing*.
+This is the part I cared most about. The map and Kafka pipeline are fun infrastructure, but the agent layer is where most of the "AI engineering" decisions live: what the model can see, what it can say, and what it is physically prevented from doing.
 
 ### Read Only
 
