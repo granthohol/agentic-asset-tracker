@@ -84,7 +84,9 @@ flowchart TB
         TWS["TelemetryWebSocket<br/>(protobuf BATCH frames)"]
         AO["AgentOrchestrationService<br/>(LLM tool loop)"]
         TR["ToolRegistry<br/>(read-only graph tools)"]
-        PE["PlanExecutor<br/>(write seam)"]
+        PX["PlanExpander<br/>(formation + route macros)"]
+        ZR["ZoneRouter<br/>(RESTRICTED CIRCLE avoidance)"]
+        PE["PlanExecutor<br/>(write seam, own worker thread)"]
         GW["GraphWriter / EntityService"]
         CP["CommandPublisher"]
     end
@@ -108,9 +110,12 @@ flowchart TB
     DS --> TWS -->|binary protobuf| ZS --> RAF --> MAP
     PANEL -->|POST /api/plan| AO
     TR --> AO
-    AO -->|ExecutionPlan| PANEL
+    AO --> PX
+    PX --> ZR
+    PX -->|ExecutionPlan| PANEL
     PANEL -->|POST /api/execute-plan| PLAN
     PLAN --> PE
+    PE --> PX
     PE --> GW --> NEO
     PE --> CP --> CMD
     CMD --> PROD
@@ -156,8 +161,8 @@ Tools live in `ToolRegistry` and only touch `GraphService` (reads). The registry
   - Tools: `list_formations`, `preview_formation`, `preview_two_phase`
   - Swarm math runs server-side. The model picks formation type + drone ids + AOI; the backend computes slot coordinates.
 - **Routing**
-  - Tools: `plan_route`
-  - Straight line when clear; otherwise detours around RESTRICTED CIRCLE zones. Single drones get `setRoute` legs; swarms insert HOLD formation centers along the detour.
+  - Tools: `plan_route` (single-drone `setRoute` legs)
+  - Straight line when clear otherwise detours around RESTRICTED CIRCLE zones. Swarms don't call this tool at all, `applyFormationRoute` hands the model's chosen form up point and destination to the backend, which runs the same router itself and expands FORM_UP/HOLD/ADVANCE waves server side, so the model can't under specify a wave or invent detour coordinates.
 
 
 ### Multi-turn orchestration
@@ -167,9 +172,15 @@ Tools live in `ToolRegistry` and only touch `GraphService` (reads). The registry
 1. Send system prompt + user command + tool specs to the model
 2. If the model returns `tool_use`, execute tools server side, append results, loop
 3. If the model returns a final answer, parse it as `ExecutionPlan` JSON
-4. Validate, expand `applyFormation` macros, return to the UI
+4. Validate, expand `applyFormation`/`applyFormationRoute` macros, return to the UI
 
 Bad JSON gets a retry (`MAX_PLAN_RETRIES = 2`) with an error message fed back to the model. Runaway loops hit the turn cap instead of billing forever.
+
+### Swarm routing: one action
+
+The model emits one `applyFormationRoute` action: formation type, drone ids, a form-up point, a destination. `PlanExpander` does the rest server side. It calls `ZoneRouter` itself and expands the result into `FORM_UP` -> `HOLD*` -> `ADVANCE` `setWaypoint` waves, one per detour leg, each wave carrying every drone id.
+
+`ZoneRouter` avoids RESTRICTED CIRCLE zones with tangent and rim sampled candidate points computed from both the start and destination (a one sided search missed narrow "clear" windows when both ends sit close to the zone), falling back to progressively wider search radii if nothing on the buffer boundary works. Routing a formation adds a wrinkle a single point router doesn't have: a path that clears the zone for the formation's center doesn't clear it for a drone sitting hundreds of meters off to the side. `PlanExpander` inflates every obstacle by the formation's own footprint radius before routing, so the whole formation, not just its center, keeps the router's clearance margin.
 
 ### Provider seam + offline dev
 
@@ -208,13 +219,17 @@ The `LlmClient` seam (`stub` vs `anthropic`) means offline dev and tests need no
 
 ### 3. Human-in-the-loop C2
 
-The LLM never writes. It reads via 20 tools, returns an `ExecutionPlan`, and waits for Accept. `PlanValidator` checks schema/policy; `PlanExecutor` is the only write path. Two-phase swarms gate ADVANCE on FORM_UP arrival in the executor, not in the model. `plan_route` + `setRoute` (or HOLD formation waves) avoid RESTRICTED CIRCLE zones.
+The LLM never writes. It reads via 20 tools, returns an `ExecutionPlan`, and waits for Accept. `PlanValidator` checks schema/policy; `PlanExecutor` is the only write path. Two phase swarms gate each wave on the previous wave's arrival in the executor, not in the model, and restricted zone avoidance is server side and deterministic on both the single drone and swarm paths
 
-### 4. Graph ontology + map entities
+### 4. Plan execution never blocks the Kafka consumer
+
+`PlanExecutor.execute()` waits for real drone arrivals between waves, so a multi-wave plan can take minutes end to end. That can't run on the `@KafkaListener` thread itself: block it too long and the broker decides the consumer is dead, revokes the partition, and redelivers the same (still uncommitted) message once polling resumes, silently replaying an in progress plan from FORM_UP while drones are already mid mission. `onPlanEnvelope` now hands off to a dedicated worker thread and returns immediately, so the listener thread stays free to keep polling.
+
+### 5. Graph ontology + map entities
 
 Fleet state is a Neo4j graph (drones, squadrons, objectives), not a flat list. Persistent map annotations (hostile tracks, patrol zones, waypoints) are CRUD-able manually or via plan actions, with live WebSocket fanout.
 
-### 5. Edge motion model
+### 6. Edge motion model
 
 Python simulator with threaded command consumer, per-drone Kafka ordering, loiter on arrival (stable "arrived" detection), and smooth time based steering. Commands and telemetry share one process with a lock on shared state.
 
