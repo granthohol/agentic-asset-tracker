@@ -22,10 +22,11 @@ drones when unspecified.
 
 For prompts like “observe the disturbance at lat,lng with a swarm in a wedge”:
 
-1. Call `preview_two_phase(formationType, droneIds, aoiLat, aoiLng)` **once**. It resolves the leader (first drone id) position from the graph, computes the FORM_UP standoff via `FormationService.standoffCenter(AOI, leaderPos, ~2000m)`, and returns a compact summary `{ formationType, droneCount, formUpCenter{lat,lng}, advanceCenter{lat,lng} }` — no per-slot list.
-2. Emit two `applyFormation` actions (see [PLAN.md](PLAN.md)): the first at `formUpCenter` with `mission_type: "FORM_UP"` and `facingLat/facingLng` = the AOI; the second at `advanceCenter` with `mission_type: "ADVANCE"`.
-3. The backend `PlanExpander` expands each `applyFormation` into one `setWaypoint` per drone (FORM_UP wave then ADVANCE wave), so the plan the operator approves is an ordinary list of `setWaypoint`s.
-4. On approve, `PlanExecutor` publishes all FORM_UP commands, **waits** until telemetry shows the swarm has formed (or ~90s timeout), then publishes ADVANCE.
+1. Resolve the **ADVANCE** AOI (named track/zone or lat/lng). Call `preview_two_phase(formationType, droneIds, aoiLat, aoiLng)` **once** with that AOI. It returns a compact summary `{ formationType, droneCount, formUpCenter{lat,lng}, advanceCenter{lat,lng} }` — default `formUpCenter` is a ~2 km standoff short of the AOI toward the leader.
+2. **Named rally / form-up waypoint:** if the operator says e.g. “form at Rally, then go to Red Track 1”, use the waypoint’s lat/lng for FORM_UP — do **not** use `preview_two_phase`’s standoff `formUpCenter`. Still use `advanceCenter` (or the track coords) for ADVANCE.
+3. Emit two `applyFormation` actions (see [PLAN.md](PLAN.md)): FORM_UP first (facing the AOI), then ADVANCE at `advanceCenter`.
+4. The backend `PlanExpander` expands each `applyFormation` into one `setWaypoint` per drone (and ensures FORM_UP waves precede ADVANCE), so the plan the operator approves is an ordinary list of `setWaypoint`s.
+5. On approve, `PlanExecutor` publishes all FORM_UP commands, **waits** until telemetry shows the swarm has formed (or ~90s timeout), then publishes ADVANCE.
 
 `preview_formation` (per-phase) is still available for single-formation asks, but two-phase swarms should prefer `preview_two_phase` + `applyFormation` (far fewer tokens in and out of the model).
 
@@ -91,8 +92,8 @@ Feed `formUpCenter` / `advanceCenter` straight into two `applyFormation` actions
 ## Planner contract
 
 1. Choose a type (`list_formations`) and drones (`list_drones`) for swarm/formation requests.
-2. Two-phase swarm: call `preview_two_phase` once, then emit two `applyFormation` actions (FORM_UP at `formUpCenter` facing the AOI, ADVANCE at `advanceCenter`). Single formation: `preview_formation` + per-slot `setWaypoint`.
-3. The backend expands `applyFormation` → per-drone `setWaypoint` (see [PLAN.md](PLAN.md)).
+2. Two-phase swarm: call `preview_two_phase` once with the ADVANCE AOI. FORM_UP at a named rally waypoint when the operator specified one; otherwise at `formUpCenter`. ADVANCE at `advanceCenter`. Single formation: `preview_formation` + per-slot `setWaypoint`.
+3. The backend expands `applyFormation` → per-drone `setWaypoint` and orders FORM_UP before ADVANCE (see [PLAN.md](PLAN.md)).
 4. Human approves → executor gates ADVANCE on form-up arrival.
 
 Do **not** invent lat/lng offsets in the model — geometry is owned by `FormationService`.

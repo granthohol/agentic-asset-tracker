@@ -2,6 +2,7 @@ package com.assettracker.backend.execution;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 import java.util.UUID;
 
 import org.slf4j.Logger;
@@ -29,7 +30,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 /**
  * Consumes approved plans from plan.events. Walks actions in order, mints tempIds,
  * resolves $refs, writes to Neo4j or publishes motion commands.
- * Two-phase swarms: publish all FORM_UP first, wait for arrival, then ADVANCE.
+ * Contiguous setWaypoint waves (same mission_type) wait for arrival before the next wave.
+ * setRoute publishes each leg and waits for that drone before the next leg.
  */
 @Component
 public class PlanExecutor {
@@ -39,8 +41,10 @@ public class PlanExecutor {
     // Edge snaps to exact target on final sub-step, so arrived drones report distance ~0.
     // Tight epsilon = wait for last drone to reach its slot. Keep in sync with DroneMap.tsx ARRIVAL_DEG.
     static final double ARRIVAL_DEG = 0.0002;
-    static final long FORM_UP_TIMEOUT_MS = 90_000L;
-    static final long FORM_UP_POLL_MS = 300L;
+    static final long WAVE_TIMEOUT_MS = 90_000L;
+    static final long WAVE_POLL_MS = 300L;
+    /** Intermediate setRoute legs before the final destination. */
+    static final String TRANSIT_MISSION = "TRANSIT";
 
     private final GraphWriter graphWriter;
     private final CommandPublisher commandPublisher;
@@ -84,27 +88,58 @@ public class PlanExecutor {
     /** Walk actions in order. Fail-fast on first error. */
     void execute(ExecutionPlan plan) {
         ExecutionContext ctx = new ExecutionContext(plan.planId());
-        List<FormUpTarget> formUps = new ArrayList<>();
-        boolean waitedForFormUp = false;
-        // Defensive expand: orchestrator already does this, but other producers might not.
+        // Defensive expand (+ FORM_UP-before-ADVANCE): orchestrator already does this.
         List<PlanAction> actions = planExpander.expandActions(plan.actions());
         log.info("Executing plan {} ({} action(s))", plan.planId(), actions.size());
 
-        for (int i = 0; i < actions.size(); i++) {
+        List<ArrivalTarget> previousWave = null;
+        int i = 0;
+        while (i < actions.size()) {
             PlanAction action = actions.get(i);
             try {
-                if (action instanceof PlanAction.SetWaypoint sw
-                    && !isFormUp(sw.missionType())
-                    && !formUps.isEmpty()
-                    && !waitedForFormUp) {
-                    waitForFormUp(plan.planId(), formUps);
-                    waitedForFormUp = true;
+                if (action instanceof PlanAction.SetRoute route) {
+                    if (previousWave != null) {
+                        waitForArrival(plan.planId(), previousWave, "prior wave");
+                        previousWave = null;
+                    }
+                    executeSetRoute(plan.planId(), route);
+                    String line = "[" + i + "] SetRoute ok (" + route.legs().size() + " legs)";
+                    ctx.report.add(line);
+                    log.info("  {}", line);
+                    i++;
+                    continue;
                 }
 
-                dispatch(action, ctx, formUps);
+                if (action instanceof PlanAction.SetWaypoint) {
+                    int waveStart = i;
+                    String waveType = normalizeMission(((PlanAction.SetWaypoint) action).missionType());
+                    List<PlanAction.SetWaypoint> wave = new ArrayList<>();
+                    while (i < actions.size() && actions.get(i) instanceof PlanAction.SetWaypoint sw
+                        && Objects.equals(waveType, normalizeMission(sw.missionType()))) {
+                        wave.add(sw);
+                        i++;
+                    }
+                    if (previousWave != null) {
+                        waitForArrival(plan.planId(), previousWave, "wave " + waveType);
+                    }
+                    List<ArrivalTarget> targets = new ArrayList<>(wave.size());
+                    for (PlanAction.SetWaypoint sw : wave) {
+                        publishWaypoint(sw.droneId(), sw.targetLat(), sw.targetLng(), sw.missionType());
+                        targets.add(new ArrivalTarget(sw.droneId(), sw.targetLat(), sw.targetLng()));
+                    }
+                    previousWave = targets;
+                    String line = "[" + waveStart + ".." + (i - 1) + "] SetWaypoint wave "
+                        + waveType + " x" + wave.size() + " ok";
+                    ctx.report.add(line);
+                    log.info("  {}", line);
+                    continue;
+                }
+
+                dispatchNonMotion(action, ctx);
                 String line = "[" + i + "] " + action.getClass().getSimpleName() + " ok";
                 ctx.report.add(line);
                 log.info("  {}", line);
+                i++;
             } catch (Exception e) {
                 String line = "[" + i + "] " + action.getClass().getSimpleName() + " FAILED: " + e.getMessage();
                 ctx.report.add(line);
@@ -116,7 +151,32 @@ public class PlanExecutor {
         log.info("Plan {} complete: {}", plan.planId(), ctx.report);
     }
 
-    private void dispatch(PlanAction action, ExecutionContext ctx, List<FormUpTarget> formUps) {
+    private void executeSetRoute(String planId, PlanAction.SetRoute route) {
+        List<List<Double>> legs = route.legs();
+        for (int li = 0; li < legs.size(); li++) {
+            List<Double> leg = legs.get(li);
+            boolean last = li == legs.size() - 1;
+            String mission = last
+                ? (route.missionType() != null ? route.missionType() : "ADVANCE")
+                : TRANSIT_MISSION;
+            double lat = leg.get(0);
+            double lng = leg.get(1);
+            publishWaypoint(route.droneId(), lat, lng, mission);
+            if (!last) {
+                waitForArrival(
+                    planId,
+                    List.of(new ArrivalTarget(route.droneId(), lat, lng)),
+                    "setRoute leg " + li);
+            }
+        }
+    }
+
+    private void publishWaypoint(String droneId, double lat, double lng, String missionType) {
+        commandPublisher.publishSetWaypoint(droneId, lat, lng, missionType);
+        graphWriter.setDroneWaypoint(droneId, new Waypoint(lat, lng));
+    }
+
+    private void dispatchNonMotion(PlanAction action, ExecutionContext ctx) {
         switch (action) {
             case PlanAction.UpsertSquadron a -> {
                 String id = resolveUpsertId(a.id(), a.tempId(), "squadron", ctx);
@@ -137,21 +197,16 @@ public class PlanExecutor {
                 graphWriter.removeDroneAssignment(a.droneId());
             case PlanAction.RemoveSquadronFromObjective a ->
                 graphWriter.removeSquadronFromObjective(ctx.resolve(a.squadronId()));
-            case PlanAction.SetWaypoint a -> {
-                commandPublisher.publishSetWaypoint(a.droneId(), a.targetLat(), a.targetLng(), a.missionType());
-                graphWriter.setDroneWaypoint(a.droneId(), new Waypoint(a.targetLat(), a.targetLng()));
-                if (isFormUp(a.missionType())) {
-                    formUps.add(new FormUpTarget(a.droneId(), a.targetLat(), a.targetLng()));
-                }
-            }
+            case PlanAction.SetWaypoint a ->
+                throw new IllegalStateException("setWaypoint must be handled as a wave");
+            case PlanAction.SetRoute a ->
+                throw new IllegalStateException("setRoute must be handled by executeSetRoute");
             case PlanAction.ApplyFormation a ->
-                // Should never hit: execute() expands these first.
                 throw new IllegalStateException("applyFormation must be expanded before dispatch");
             case PlanAction.ClearWaypoint a -> {
                 graphWriter.clearDroneWaypoint(a.droneId());
                 commandPublisher.publishClearWaypoint(a.droneId());
             }
-            // Map entities go through EntityService so agent edits show on the live map.
             case PlanAction.UpsertTrack a -> {
                 String id = resolveUpsertId(a.id(), a.tempId(), "track", ctx);
                 entityService.upsertTrack(new TrackNode(
@@ -189,28 +244,28 @@ public class PlanExecutor {
         return new ZoneNode(id, a.name(), a.type(), a.shape(), null, null, null, lats, lngs);
     }
 
-    private void waitForFormUp(String planId, List<FormUpTarget> formUps) {
-        log.info("Plan {}: waiting for {} FORM_UP drone(s) to arrive (timeout {}ms)",
-            planId, formUps.size(), FORM_UP_TIMEOUT_MS);
-        long deadline = System.currentTimeMillis() + FORM_UP_TIMEOUT_MS;
+    private void waitForArrival(String planId, List<ArrivalTarget> targets, String label) {
+        log.info("Plan {}: waiting for {} target(s) ({}) timeout {}ms",
+            planId, targets.size(), label, WAVE_TIMEOUT_MS);
+        long deadline = System.currentTimeMillis() + WAVE_TIMEOUT_MS;
         while (System.currentTimeMillis() < deadline) {
-            if (allFormed(formUps)) {
-                log.info("Plan {}: FORM_UP complete, publishing ADVANCE wave", planId);
+            if (allArrived(targets)) {
+                log.info("Plan {}: {} complete", planId, label);
                 return;
             }
             try {
-                Thread.sleep(FORM_UP_POLL_MS);
+                Thread.sleep(WAVE_POLL_MS);
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
-                log.warn("Plan {}: FORM_UP wait interrupted, advancing anyway", planId);
+                log.warn("Plan {}: {} wait interrupted, continuing", planId, label);
                 return;
             }
         }
-        log.warn("Plan {}: FORM_UP wait timed out, advancing anyway", planId);
+        log.warn("Plan {}: {} wait timed out, continuing", planId, label);
     }
 
-    private boolean allFormed(List<FormUpTarget> formUps) {
-        for (FormUpTarget t : formUps) {
+    private boolean allArrived(List<ArrivalTarget> targets) {
+        for (ArrivalTarget t : targets) {
             Drone d = droneService.getDrone(t.droneId());
             if (d == null) {
                 return false;
@@ -223,11 +278,15 @@ public class PlanExecutor {
         return true;
     }
 
-    static boolean isFormUp(String missionType) {
-        if (missionType == null) {
-            return false;
+    static String normalizeMission(String missionType) {
+        if (missionType == null || missionType.isBlank()) {
+            return "";
         }
-        String m = missionType.trim().toUpperCase();
+        return missionType.trim().toUpperCase();
+    }
+
+    static boolean isFormUp(String missionType) {
+        String m = normalizeMission(missionType);
         return "FORM_UP".equals(m) || "HOLD".equals(m);
     }
 
@@ -240,5 +299,5 @@ public class PlanExecutor {
         return realId;
     }
 
-    record FormUpTarget(String droneId, double targetLat, double targetLng) {}
+    record ArrivalTarget(String droneId, double targetLat, double targetLng) {}
 }

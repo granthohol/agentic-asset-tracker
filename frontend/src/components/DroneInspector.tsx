@@ -4,6 +4,7 @@ import { useMap } from 'react-leaflet';
 
 import type { Drone } from '../types/drone';
 import type { MissionVisualStatus } from './droneIcons';
+import { fetchDroneDetail } from '../api';
 
 interface DroneInspectorProps {
     drone: Drone;
@@ -55,6 +56,34 @@ export default function DroneInspector({
     // New drone → follow again.
     useEffect(() => {
         setPinned(null);
+    }, [drone.id]);
+
+    const [squadronName, setSquadronName] = useState<string | null>(null);
+    const [squadronLoading, setSquadronLoading] = useState(true);
+
+    useEffect(() => {
+        let cancelled = false;
+        setSquadronLoading(true);
+        setSquadronName(null);
+        fetchDroneDetail(drone.id)
+            .then((detail) => {
+                if (!cancelled) {
+                    setSquadronName(detail.squadron?.name ?? null);
+                }
+            })
+            .catch(() => {
+                if (!cancelled) {
+                    setSquadronName(null);
+                }
+            })
+            .finally(() => {
+                if (!cancelled) {
+                    setSquadronLoading(false);
+                }
+            });
+        return () => {
+            cancelled = true;
+        };
     }, [drone.id]);
 
     const anchor = map.latLngToContainerPoint([drone.latitude, drone.longitude]);
@@ -140,6 +169,14 @@ export default function DroneInspector({
                     <span className={`drone-inspector__pill drone-inspector__pill--${role}`}>
                         {ROLE_LABEL[role]}
                         {missionType ? ` \u00b7 ${missionType}` : ''}
+                    </span>
+                </div>
+                <div className="drone-inspector__row">
+                    <span className="drone-inspector__label">Squadron</span>
+                    <span className="drone-inspector__value">
+                        {squadronLoading
+                            ? '…'
+                            : squadronName ?? 'Unassigned'}
                     </span>
                 </div>
                 <div className="drone-inspector__row">

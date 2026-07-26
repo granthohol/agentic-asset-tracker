@@ -3,6 +3,7 @@ package com.assettracker.backend.agent.llm;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.Set;
 import java.util.UUID;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -63,6 +64,7 @@ public class StubLlmClient implements LlmClient {
     public LlmResponse complete(LlmRequest request) {
         boolean hasListDrones = hasToolResult(request, "list_drones");
         int twoPhaseCount = countToolResults(request, "preview_two_phase");
+        int planRouteCount = countToolResults(request, "plan_route");
 
         if (!hasListDrones) {
             return LlmResponse.toolUse(
@@ -88,17 +90,40 @@ public class StubLlmClient implements LlmClient {
 
         List<String> available = collectAllDroneIds(request);
         List<String> droneIds = selectDroneIds(userCommand, available);
-        double[] aoi = resolveAoi(userCommand, request);
+        // Advance/AOI target (track/zone/coords). Named form-up waypoint is separate.
+        double[] aoi = resolveAdvanceAoi(userCommand, request);
+        double[] namedFormUp = resolveNamedFormUpCenter(userCommand, request);
         FormationType type = inferFormationType(userCommand);
+        boolean avoid = wantsAvoid(userCommand);
 
         if (droneIds.isEmpty()) {
-            // No drones: objective-only plan.
             ExecutionPlan plan = buildStubPlan(
-                firstIdFromTool(request, "list_squadrons"), userCommand, aoi, type, droneIds, null, null);
+                firstIdFromTool(request, "list_squadrons"), userCommand, aoi, type, droneIds, null, null, null);
             return end(plan);
         }
 
-        // Turn 2: one preview_two_phase call for both centers.
+        // Single-drone avoid: plan_route from current pos to AOI, then setRoute.
+        if (avoid && droneIds.size() == 1) {
+            String droneId = droneIds.get(0);
+            if (planRouteCount == 0) {
+                double[] from = droneLatLng(request, droneId);
+                if (from == null) {
+                    from = new double[] { aoi[0] - 0.02, aoi[1] };
+                }
+                return LlmResponse.toolUse(
+                    "Planning a route for " + droneId + " that avoids restricted circles.",
+                    List.of(new ToolCall(
+                        "call_plan_route",
+                        "plan_route",
+                        planRouteArgs(from[0], from[1], aoi[0], aoi[1])
+                    ))
+                );
+            }
+            JsonNode route = requireSuccessfulRoute(allToolContents(request, "plan_route").get(0));
+            return end(buildSingleDroneRoutePlan(droneId, userCommand, aoi, route));
+        }
+
+        // Turn 2: preview_two_phase for ADVANCE AOI (and default standoff form-up when none named).
         if (twoPhaseCount == 0) {
             return LlmResponse.toolUse(
                 "Previewing " + type + " two-phase approach for " + droneIds.size() + " drone(s).",
@@ -110,12 +135,53 @@ public class StubLlmClient implements LlmClient {
             );
         }
 
-        // Turn 3: plan with two applyFormation macros. Orchestrator expands to setWaypoints.
         JsonNode summary = allToolContents(request, "preview_two_phase").get(0);
-        double[] formUp = centerFromSummary(summary, "formUpCenter", new double[] { aoi[0] - 0.018, aoi[1] });
+        double[] previewFormUp = centerFromSummary(
+            summary, "formUpCenter", new double[] { aoi[0] - 0.018, aoi[1] });
         double[] advance = centerFromSummary(summary, "advanceCenter", aoi);
+
+        // Swarm avoid: route the ACTUAL FORM_UP point (named rally, else leader's current
+        // position) → ADVANCE, so the detour spine matches the leg the swarm will really fly.
+        // A computed standoff center (previewFormUp) is a poor route origin — it's often
+        // on/inside the no-fly itself — so fall back to the leader's live position only when
+        // no rally was named.
+        if (avoid && planRouteCount == 0) {
+            double[] from;
+            if (namedFormUp != null) {
+                from = namedFormUp;
+            } else {
+                from = droneLatLng(request, droneIds.get(0));
+                if (from == null) {
+                    from = previewFormUp;
+                }
+            }
+            return LlmResponse.toolUse(
+                "Routing the swarm approach around restricted circles.",
+                List.of(new ToolCall(
+                    "call_plan_route",
+                    "plan_route",
+                    planRouteArgs(from[0], from[1], advance[0], advance[1])
+                ))
+            );
+        }
+
+        JsonNode route = null;
+        if (planRouteCount > 0) {
+            route = requireSuccessfulRoute(allToolContents(request, "plan_route").get(0));
+        }
+
+        double[] formUp;
+        if (namedFormUp != null) {
+            formUp = namedFormUp;
+        } else if (avoid && route != null && !route.path("direct").asBoolean(true)) {
+            // First detour waypoint becomes the form-up center (clear of the circle).
+            formUp = firstIntermediateOr(route, previewFormUp);
+        } else {
+            formUp = previewFormUp;
+        }
+
         ExecutionPlan plan = buildStubPlan(
-            firstIdFromTool(request, "list_squadrons"), userCommand, aoi, type, droneIds, formUp, advance);
+            firstIdFromTool(request, "list_squadrons"), userCommand, aoi, type, droneIds, formUp, advance, route);
         return end(plan);
     }
 
@@ -139,6 +205,15 @@ public class StubLlmClient implements LlmClient {
         return args;
     }
 
+    private ObjectNode planRouteArgs(double fromLat, double fromLng, double toLat, double toLng) {
+        ObjectNode args = mapper.createObjectNode();
+        args.put("fromLat", fromLat);
+        args.put("fromLng", fromLng);
+        args.put("toLat", toLat);
+        args.put("toLng", toLng);
+        return args;
+    }
+
     /** Read {lat,lng} from preview_two_phase summary, or use fallback. */
     private static double[] centerFromSummary(JsonNode summary, String key, double[] fallback) {
         JsonNode c = summary == null ? null : summary.get(key);
@@ -148,7 +223,35 @@ public class StubLlmClient implements LlmClient {
         return fallback;
     }
 
-    /** Stub plan: objective + deploy, plus two applyFormation macros when drones are selected. */
+    static boolean wantsAvoid(String userCommand) {
+        if (userCommand == null) {
+            return false;
+        }
+        String lower = userCommand.toLowerCase(Locale.ROOT);
+        return containsAny(lower, "avoid", "no-fly", "no fly", "nofly", "keep out", "keep-out",
+            "restricted zone", "around the zone", "around the restricted");
+    }
+
+    private ExecutionPlan buildSingleDroneRoutePlan(
+        String droneId, String userCommand, double[] aoi, JsonNode route
+    ) {
+        List<List<Double>> legs = legsFromRoute(route, aoi[0], aoi[1]);
+        List<PlanAction> actions = new ArrayList<>();
+        actions.add(new PlanAction.UpsertObjective(
+            null, "obj-1", "Observe disturbance", 1, aoi[0], aoi[1], 500.0, null));
+        actions.add(new PlanAction.SetRoute(droneId, legs, "ADVANCE"));
+        boolean direct = route != null && route.path("direct").asBoolean(false);
+        String cmd = userCommand == null ? "(no command)" : userCommand;
+        String rationale = "Stub plan for: \"" + cmd + "\". Route " + droneId
+            + " in " + legs.size() + " leg(s)"
+            + (direct ? " (direct)." : " avoiding restricted circles.");
+        return new ExecutionPlan("plan-" + UUID.randomUUID(), rationale, actions);
+    }
+
+    /**
+     * Stub plan: objective + deploy, plus applyFormation waves when drones are selected.
+     * When {@code route} has detour legs, inserts HOLD formations at intermediate centers.
+     */
     private ExecutionPlan buildStubPlan(
         String squadronId,
         String userCommand,
@@ -156,7 +259,8 @@ public class StubLlmClient implements LlmClient {
         FormationType type,
         List<String> droneIds,
         double[] formUpCenter,
-        double[] advanceCenter
+        double[] advanceCenter,
+        JsonNode route
     ) {
         List<PlanAction> actions = new ArrayList<>();
         double aoiLat = aoi[0];
@@ -175,22 +279,157 @@ public class StubLlmClient implements LlmClient {
 
         String cmd = userCommand == null ? "(no command)" : userCommand;
         String rationale;
-        // Inline check so null-analysis narrows formUpCenter/advanceCenter in the else branch.
         if (droneIds == null || droneIds.isEmpty() || formUpCenter == null || advanceCenter == null) {
             rationale = "Stub plan for: \"" + cmd + "\". Creates an objective and deploys assets to it.";
         } else {
-            // FORM_UP faces the AOI; ADVANCE keeps the approach heading.
             double faceLat = aoiLat + (aoiLat - formUpCenter[0]);
             double faceLng = aoiLng + (aoiLng - formUpCenter[1]);
             actions.add(new PlanAction.ApplyFormation(
                 type, formUpCenter[0], formUpCenter[1], droneIds, "FORM_UP", null, aoiLat, aoiLng));
+
+            List<double[]> intermediates = intermediateCenters(route, advanceCenter);
+            for (double[] hold : intermediates) {
+                // Skip HOLD that duplicates the FORM_UP center (common when form-up is the first detour).
+                if (Math.abs(hold[0] - formUpCenter[0]) < 1e-5
+                    && Math.abs(hold[1] - formUpCenter[1]) < 1e-5) {
+                    continue;
+                }
+                actions.add(new PlanAction.ApplyFormation(
+                    type, hold[0], hold[1], droneIds, "HOLD", null, aoiLat, aoiLng));
+            }
+
             actions.add(new PlanAction.ApplyFormation(
                 type, advanceCenter[0], advanceCenter[1], droneIds, "ADVANCE", null, faceLat, faceLng));
             rationale = "Stub plan for: \"" + cmd + "\". " + type
                 + ": form up under leader " + droneIds.get(0)
-                + " (" + droneIds.size() + " drones), then ADVANCE on the disturbance.";
+                + " (" + droneIds.size() + " drones)"
+                + (intermediates.isEmpty() ? "" : ", " + intermediates.size() + " HOLD detour(s)")
+                + ", then ADVANCE on the disturbance.";
         }
         return new ExecutionPlan("plan-" + UUID.randomUUID(), rationale, actions);
+    }
+
+    /** Legs from a successful plan_route JSON. Empty/error routes must not silently go direct. */
+    private static List<List<Double>> legsFromRoute(JsonNode route, double toLat, double toLng) {
+        requireSuccessfulRoute(route);
+        List<List<Double>> legs = new ArrayList<>();
+        for (JsonNode leg : route.path("legs")) {
+            if (leg.hasNonNull("lat") && leg.hasNonNull("lng")) {
+                legs.add(List.of(leg.get("lat").asDouble(), leg.get("lng").asDouble()));
+            }
+        }
+        if (legs.isEmpty()) {
+            throw new IllegalStateException("plan_route returned no legs");
+        }
+        // Ensure final destination is present.
+        List<Double> last = legs.get(legs.size() - 1);
+        if (Math.abs(last.get(0) - toLat) > 1e-5 || Math.abs(last.get(1) - toLng) > 1e-5) {
+            legs.add(List.of(toLat, toLng));
+        }
+        return legs;
+    }
+
+    /**
+     * Intermediate centers for swarm HOLD waves: plan_route legs except the final destination.
+     * When FORM_UP already sits on the first detour, skip that leg so we do not HOLD in place.
+     */
+    private static List<double[]> intermediateCenters(JsonNode route, double[] advanceCenter) {
+        List<double[]> out = new ArrayList<>();
+        if (route == null || routeHasError(route) || !route.path("legs").isArray()) {
+            return out;
+        }
+        JsonNode legs = route.path("legs");
+        for (int i = 0; i < legs.size(); i++) {
+            JsonNode leg = legs.get(i);
+            if (!leg.hasNonNull("lat") || !leg.hasNonNull("lng")) {
+                continue;
+            }
+            double lat = leg.get("lat").asDouble();
+            double lng = leg.get("lng").asDouble();
+            if (i == legs.size() - 1) {
+                continue;
+            }
+            if (Math.abs(lat - advanceCenter[0]) < 1e-6 && Math.abs(lng - advanceCenter[1]) < 1e-6) {
+                continue;
+            }
+            out.add(new double[] { lat, lng });
+        }
+        return out;
+    }
+
+    private static double[] firstIntermediateOr(JsonNode route, double[] fallback) {
+        if (route == null || !route.path("legs").isArray() || route.path("legs").isEmpty()) {
+            return fallback;
+        }
+        JsonNode legs = route.path("legs");
+        if (legs.size() < 2) {
+            return fallback;
+        }
+        JsonNode first = legs.get(0);
+        if (first.hasNonNull("lat") && first.hasNonNull("lng")) {
+            return new double[] { first.get("lat").asDouble(), first.get("lng").asDouble() };
+        }
+        return fallback;
+    }
+
+    static JsonNode requireSuccessfulRoute(JsonNode route) {
+        if (route == null || routeHasError(route)) {
+            String msg = route == null ? "missing plan_route result"
+                : route.path("error").asText("plan_route failed");
+            throw new IllegalStateException("Cannot build avoid plan: " + msg);
+        }
+        return route;
+    }
+
+    static boolean routeHasError(JsonNode route) {
+        return route != null && route.hasNonNull("error");
+    }
+
+    /** Lat/lng for a drone from columnar or legacy list_drones results. */
+    private double[] droneLatLng(LlmRequest request, String droneId) {
+        for (JsonNode content : allToolContents(request, "list_drones")) {
+            if (content.isArray()) {
+                for (JsonNode d : content) {
+                    if (droneId.equals(d.path("id").asText())
+                        && d.hasNonNull("latitude") && d.hasNonNull("longitude")) {
+                        return new double[] { d.get("latitude").asDouble(), d.get("longitude").asDouble() };
+                    }
+                    if (droneId.equals(d.path("id").asText())
+                        && d.hasNonNull("lat") && d.hasNonNull("lng")) {
+                        return new double[] { d.get("lat").asDouble(), d.get("lng").asDouble() };
+                    }
+                }
+                continue;
+            }
+            JsonNode fields = content.get("fields");
+            JsonNode rows = content.get("rows");
+            if (fields == null || rows == null || !fields.isArray() || !rows.isArray()) {
+                continue;
+            }
+            int idIdx = -1;
+            int latIdx = -1;
+            int lngIdx = -1;
+            for (int i = 0; i < fields.size(); i++) {
+                String f = fields.get(i).asText();
+                if ("id".equals(f)) {
+                    idIdx = i;
+                } else if ("lat".equals(f) || "latitude".equals(f)) {
+                    latIdx = i;
+                } else if ("lng".equals(f) || "longitude".equals(f)) {
+                    lngIdx = i;
+                }
+            }
+            if (idIdx < 0 || latIdx < 0 || lngIdx < 0) {
+                continue;
+            }
+            for (JsonNode row : rows) {
+                if (row.isArray() && row.size() > Math.max(idIdx, Math.max(latIdx, lngIdx))
+                    && droneId.equals(row.get(idIdx).asText())) {
+                    return new double[] { row.get(latIdx).asDouble(), row.get(lngIdx).asDouble() };
+                }
+            }
+        }
+        return null;
     }
 
     static FormationType inferFormationType(String userCommand) {
@@ -286,26 +525,80 @@ public class StubLlmClient implements LlmClient {
         return null;
     }
 
-    /** AOI: explicit lat,lng wins, else named zone/waypoint from tool results, else default. */
-    private double[] resolveAoi(String userCommand, LlmRequest request) {
+    /**
+     * ADVANCE / objective center. Prefer tracks over zones/waypoints so a form-up rally
+     * point is not mistaken for the destination when both are named.
+     * Never use a RESTRICTED zone center as the AOI (especially on avoid prompts).
+     */
+    private double[] resolveAdvanceAoi(String userCommand, LlmRequest request) {
         if (hasExplicitLatLng(userCommand)) {
             return parseLatLng(userCommand);
         }
         String lower = userCommand == null ? "" : userCommand.toLowerCase(Locale.ROOT);
-        double[] zone = zoneCenterByName(lower, request);
-        if (zone != null) {
-            return zone;
+        double[] track = trackCenterByName(lower, request);
+        if (track != null) {
+            return track;
         }
-        double[] wp = waypointByName(lower, request);
-        if (wp != null) {
-            return wp;
+        // PATROL zones can be destinations; RESTRICTED circles are obstacles only.
+        double[] patrol = patrolZoneCenterByName(lower, request);
+        if (patrol != null) {
+            return patrol;
+        }
+        // Only use a named waypoint as the AOI when it is not the form-up rally.
+        if (resolveNamedFormUpCenter(userCommand, request) == null) {
+            double[] wp = waypointByName(lower, request);
+            if (wp != null) {
+                return wp;
+            }
         }
         return parseLatLng(userCommand);
     }
 
-    private double[] zoneCenterByName(String lowerPrompt, LlmRequest request) {
+    /**
+     * Explicit form-up location from a named map waypoint (e.g. "form up at Rally").
+     * Null when the operator did not name a rally / form-up waypoint.
+     */
+    private double[] resolveNamedFormUpCenter(String userCommand, LlmRequest request) {
+        if (userCommand == null) {
+            return null;
+        }
+        String lower = userCommand.toLowerCase(Locale.ROOT);
+        if (!wantsNamedFormUp(lower)) {
+            return null;
+        }
+        return waypointByName(lower, request);
+    }
+
+    /** True when the prompt asks to form / rally at a place before advancing. */
+    static boolean wantsNamedFormUp(String lowerPrompt) {
+        if (lowerPrompt == null || lowerPrompt.isBlank()) {
+            return false;
+        }
+        return containsAny(lowerPrompt,
+            "form up at", "form at", "form a", "form the", "form up the",
+            "swarm at", "rally at", "rally to", "meet at", "assemble at",
+            "at the waypoint", "at waypoint", "at the rally");
+    }
+
+    private double[] trackCenterByName(String lowerPrompt, LlmRequest request) {
+        for (JsonNode arr : allToolContents(request, "list_tracks")) {
+            for (JsonNode t : arr) {
+                if (entityNameReferenced(lowerPrompt, t)
+                    && t.hasNonNull("latitude") && t.hasNonNull("longitude")) {
+                    return new double[] { t.get("latitude").asDouble(), t.get("longitude").asDouble() };
+                }
+            }
+        }
+        return null;
+    }
+
+    private double[] patrolZoneCenterByName(String lowerPrompt, LlmRequest request) {
         for (JsonNode arr : allToolContents(request, "list_zones")) {
             for (JsonNode z : arr) {
+                String type = z.path("type").asText("").toUpperCase(Locale.ROOT);
+                if (!"PATROL".equals(type)) {
+                    continue;
+                }
                 if (entityNameReferenced(lowerPrompt, z)
                     && z.hasNonNull("centerLatitude") && z.hasNonNull("centerLongitude")) {
                     return new double[] {
@@ -332,6 +625,12 @@ public class StubLlmClient implements LlmClient {
         return new ExecutionPlan("plan-" + UUID.randomUUID(), rationale, List.of(actions));
     }
 
+    /** Generic tokens that appear in prompts without naming a specific entity. */
+    private static final Set<String> ENTITY_NAME_STOPWORDS = Set.of(
+        "zone", "track", "point", "area", "contact", "waypoint", "rally", "drone",
+        "restricted", "patrol", "nofly", "hostile", "friendly", "unknown", "aerial", "ground"
+    );
+
     static boolean entityNameReferenced(String lowerPrompt, JsonNode entity) {
         JsonNode name = entity.get("name");
         if (name == null || name.isNull()) {
@@ -345,7 +644,10 @@ public class StubLlmClient implements LlmClient {
             return true;
         }
         for (String token : n.split("[^a-z0-9]+")) {
-            if (token.length() >= 4 && lowerPrompt.contains(token)) {
+            if (token.length() < 4 || ENTITY_NAME_STOPWORDS.contains(token)) {
+                continue;
+            }
+            if (lowerPrompt.contains(token)) {
                 return true;
             }
         }

@@ -26,6 +26,7 @@ import com.fasterxml.jackson.annotation.JsonTypeInfo;
     @JsonSubTypes.Type(value = PlanAction.RemoveDroneAssignment.class, name = "removeDroneAssignment"),
     @JsonSubTypes.Type(value = PlanAction.RemoveSquadronFromObjective.class, name = "removeSquadronFromObjective"),
     @JsonSubTypes.Type(value = PlanAction.SetWaypoint.class, name = "setWaypoint"),
+    @JsonSubTypes.Type(value = PlanAction.SetRoute.class, name = "setRoute"),
     @JsonSubTypes.Type(value = PlanAction.ApplyFormation.class, name = "applyFormation"),
     @JsonSubTypes.Type(value = PlanAction.ClearWaypoint.class, name = "clearWaypoint"),
     @JsonSubTypes.Type(value = PlanAction.UpsertTrack.class, name = "upsertTrack"),
@@ -87,6 +88,18 @@ public sealed interface PlanAction {
         String droneId,
         double targetLat,
         double targetLng,
+        @JsonProperty("mission_type") String missionType
+    ) implements PlanAction {}
+
+    /**
+     * Multi-leg route for one drone. Executor publishes each leg as SET_WAYPOINT and waits
+     * for arrival before the next. legs are [[lat,lng],...] ending at the destination.
+     * Intermediate legs use mission_type TRANSIT; the final leg uses this missionType.
+     */
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    record SetRoute(
+        String droneId,
+        List<List<Double>> legs,
         @JsonProperty("mission_type") String missionType
     ) implements PlanAction {}
 

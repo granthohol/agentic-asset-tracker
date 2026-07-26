@@ -11,8 +11,14 @@ import org.springframework.stereotype.Component;
 import com.assettracker.backend.agent.formation.FormationPreview;
 import com.assettracker.backend.agent.formation.FormationService;
 import com.assettracker.backend.agent.formation.FormationType;
+import com.assettracker.backend.agent.routing.CircleObstacle;
+import com.assettracker.backend.agent.routing.RouteResult;
+import com.assettracker.backend.agent.routing.ZoneRouter;
 import com.assettracker.backend.graph.DroneNode;
 import com.assettracker.backend.graph.GraphService;
+import com.assettracker.backend.graph.ZoneNode;
+import com.assettracker.backend.graph.ZoneShape;
+import com.assettracker.backend.graph.ZoneType;
 import com.assettracker.backend.model.DroneStatus;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -175,11 +181,12 @@ public class ToolRegistry {
         register(new Tool(
             "preview_two_phase",
             "Plan a two-phase swarm approach in ONE call. Given a formation type, ordered droneIds, "
-                + "and the AOI (aoiLat/aoiLng), returns COMPACT centers only: a FORM_UP standoff center "
-                + "near the leader (first droneId) and the ADVANCE center (the AOI). Emit two "
-                + "applyFormation actions from these centers (FORM_UP then ADVANCE). No per-slot "
-                + "coordinates needed. Returns {formationType, droneCount, formUpCenter{lat,lng}, "
-                + "advanceCenter{lat,lng}}.",
+                + "and the ADVANCE AOI (aoiLat/aoiLng — track/zone/coords destination), returns COMPACT "
+                + "centers: a default FORM_UP standoff short of the AOI toward the leader, and "
+                + "advanceCenter at the AOI. If the operator named a distinct form-up/rally waypoint, "
+                + "IGNORE formUpCenter and use that waypoint's lat/lng for FORM_UP instead. Emit two "
+                + "applyFormation actions (FORM_UP then ADVANCE). No per-slot coordinates needed. "
+                + "Returns {formationType, droneCount, formUpCenter{lat,lng}, advanceCenter{lat,lng}}.",
             objectSchema(
                 props(
                     "formationType", enumField("Formation type from list_formations.", "RING", "WEDGE", "LINE"),
@@ -245,6 +252,31 @@ public class ToolRegistry {
             args -> graph.getZoneById(requireString(args, "id"))
                 .map(z -> (JsonNode) mapper.valueToTree(z))
                 .orElseGet(() -> notFound("id", optString(args, "id")))
+        ));
+
+        ObjectNode zoneIdsField = field("array",
+            "Optional zone ids to avoid. Default: every RESTRICTED CIRCLE zone. Polygons ignored.");
+        zoneIdsField.set("items", field("string", "A zone id from list_zones."));
+
+        register(new Tool(
+            "plan_route",
+            "Plan a path from (fromLat,fromLng) to (toLat,toLng) that avoids RESTRICTED CIRCLE zones. "
+                + "Returns {legs:[{lat,lng},...], avoidedZoneIds:[...], direct:bool} or {error}. "
+                + "legs are ordered destinations (no start). NEVER use a RESTRICTED zone center as the destination. "
+                + "Single drone: emit setRoute with those legs. Swarm: route leader→ADVANCE; FORM_UP at the first "
+                + "detour (or a clear named rally), HOLD on later intermediates, ADVANCE at the destination. "
+                + "Planning only; does not move drones.",
+            objectSchema(
+                props(
+                    "fromLat", field("number", "Start latitude."),
+                    "fromLng", field("number", "Start longitude."),
+                    "toLat", field("number", "Destination latitude."),
+                    "toLng", field("number", "Destination longitude."),
+                    "zoneIds", zoneIdsField
+                ),
+                "fromLat", "fromLng", "toLat", "toLng"
+            ),
+            this::planRoute
         ));
     }
 
@@ -358,6 +390,72 @@ public class ToolRegistry {
         ObjectNode f = field("array", "Ordered drone ids for the swarm (leader first), from list_drones.");
         f.set("items", field("string", "A drone id, e.g. 'drone-000'."));
         return f;
+    }
+
+    /** Route around RESTRICTED CIRCLE zones. Polygons and PATROL zones are skipped. */
+    private JsonNode planRoute(JsonNode args) {
+        double fromLat = requireDouble(args, "fromLat");
+        double fromLng = requireDouble(args, "fromLng");
+        double toLat = requireDouble(args, "toLat");
+        double toLng = requireDouble(args, "toLng");
+        List<String> zoneIds = optStringList(args, "zoneIds");
+
+        List<CircleObstacle> obstacles = new ArrayList<>();
+        if (zoneIds == null) {
+            for (ZoneNode z : graph.listZones()) {
+                toCircleObstacle(z).ifPresent(obstacles::add);
+            }
+        } else {
+            for (String id : zoneIds) {
+                ZoneNode z = graph.getZoneById(id)
+                    .orElseThrow(() -> new IllegalArgumentException("Unknown zone id: " + id));
+                toCircleObstacle(z).ifPresent(obstacles::add);
+            }
+        }
+
+        RouteResult route = ZoneRouter.plan(fromLat, fromLng, toLat, toLng, obstacles);
+        ObjectNode out = mapper.createObjectNode();
+        ArrayNode legs = out.putArray("legs");
+        for (double[] leg : route.legs()) {
+            ObjectNode p = legs.addObject();
+            p.put("lat", round5(leg[0]));
+            p.put("lng", round5(leg[1]));
+        }
+        ArrayNode avoided = out.putArray("avoidedZoneIds");
+        for (String id : route.avoidedZoneIds()) {
+            avoided.add(id);
+        }
+        out.put("direct", route.direct());
+        return out;
+    }
+
+    private static java.util.Optional<CircleObstacle> toCircleObstacle(ZoneNode z) {
+        if (z.type() != ZoneType.RESTRICTED || z.shape() != ZoneShape.CIRCLE) {
+            return java.util.Optional.empty();
+        }
+        if (z.centerLatitude() == null || z.centerLongitude() == null || z.radiusMeters() == null) {
+            return java.util.Optional.empty();
+        }
+        return java.util.Optional.of(new CircleObstacle(
+            z.id(), z.centerLatitude(), z.centerLongitude(), z.radiusMeters()));
+    }
+
+    private List<String> optStringList(JsonNode args, String key) {
+        JsonNode v = args.get(key);
+        if (v == null || v.isNull()) {
+            return null;
+        }
+        if (!v.isArray()) {
+            throw new IllegalArgumentException("Non-array optional argument: " + key);
+        }
+        List<String> out = new ArrayList<>();
+        for (JsonNode el : v) {
+            if (el == null || el.isNull()) {
+                continue;
+            }
+            out.add(el.asText());
+        }
+        return out;
     }
 
     // JSON Schema helpers

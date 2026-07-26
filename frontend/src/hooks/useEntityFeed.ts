@@ -59,7 +59,7 @@ export function useEntityFeed(): void {
                         applyDelete(message.kind, message.id);
                         break;
                     default:
-                        console.log('Unhandled entity message type', message);
+                        console.warn('Unhandled entity message type', message);
                 }
             };
 

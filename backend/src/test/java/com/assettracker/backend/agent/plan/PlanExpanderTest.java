@@ -84,4 +84,23 @@ class PlanExpanderTest {
         assertThatThrownBy(() -> expander.expand(plan))
             .isInstanceOf(IllegalArgumentException.class);
     }
+
+    @Test
+    void reordersAdvanceWaveBeforeFormUp() {
+        PlanAction objective = new PlanAction.UpsertObjective(
+            null, "obj-1", "Observe", 1, 39.0, -77.0, 100.0, null);
+        List<PlanAction> out = expander.expandActions(List.of(
+            objective,
+            new PlanAction.SetWaypoint("drone-000", 39.05, -77.18, "ADVANCE"),
+            new PlanAction.SetWaypoint("drone-001", 39.051, -77.181, "ADVANCE"),
+            new PlanAction.SetWaypoint("drone-000", 38.90, -77.30, "FORM_UP"),
+            new PlanAction.SetWaypoint("drone-001", 38.901, -77.301, "FORM_UP")
+        ));
+
+        assertThat(out.get(0)).isEqualTo(objective);
+        assertThat(((PlanAction.SetWaypoint) out.get(1)).missionType()).isEqualTo("FORM_UP");
+        assertThat(((PlanAction.SetWaypoint) out.get(2)).missionType()).isEqualTo("FORM_UP");
+        assertThat(((PlanAction.SetWaypoint) out.get(3)).missionType()).isEqualTo("ADVANCE");
+        assertThat(((PlanAction.SetWaypoint) out.get(4)).missionType()).isEqualTo("ADVANCE");
+    }
 }

@@ -143,6 +143,49 @@ class AgentOrchestrationServiceTest {
     }
 
     @Test
+    void formAtNamedWaypointThenTrackCentersFormUpOnRally() {
+        when(graph.listSquadrons()).thenReturn(List.of());
+        when(graph.listDrones()).thenReturn(IntStream.range(0, 4)
+            .mapToObj(i -> new DroneNode(
+                "drone-00" + i, 39.0, -77.2, 80, DroneStatus.ACTIVE, null))
+            .toList());
+        when(graph.listWaypoints()).thenReturn(List.of(
+            new com.assettracker.backend.graph.WaypointNode("wp-rally", "Rally", 38.90, -77.40)));
+        when(graph.listTracks()).thenReturn(List.of(
+            new com.assettracker.backend.graph.TrackNode(
+                "trk-1", "Red Track 1",
+                com.assettracker.backend.graph.Affiliation.HOSTILE,
+                com.assettracker.backend.graph.TrackDomain.AERIAL,
+                39.05, -77.18)));
+        when(graph.listZones()).thenReturn(List.of());
+        when(graph.getDroneById("drone-000")).thenReturn(java.util.Optional.of(
+            new com.assettracker.backend.graph.DroneDetail(
+                new DroneNode("drone-000", 39.0, -77.2, 80, DroneStatus.ACTIVE, null), null, null)));
+
+        ExecutionPlan plan = orchestrator.planFromPrompt(
+            "Form a drone swarm at the waypoint \"Rally\", then once formed, send the swarm to Red Track 1.");
+
+        List<PlanAction.SetWaypoint> formUps = plan.actions().stream()
+            .filter(a -> a instanceof PlanAction.SetWaypoint sw && "FORM_UP".equals(sw.missionType()))
+            .map(a -> (PlanAction.SetWaypoint) a)
+            .toList();
+        List<PlanAction.SetWaypoint> advances = plan.actions().stream()
+            .filter(a -> a instanceof PlanAction.SetWaypoint sw && "ADVANCE".equals(sw.missionType()))
+            .map(a -> (PlanAction.SetWaypoint) a)
+            .toList();
+        assertThat(formUps).isNotEmpty();
+        assertThat(advances).isNotEmpty();
+
+        double formUpAvgLat = formUps.stream().mapToDouble(PlanAction.SetWaypoint::targetLat).average().orElse(0);
+        double formUpAvgLng = formUps.stream().mapToDouble(PlanAction.SetWaypoint::targetLng).average().orElse(0);
+        double advanceAvgLat = advances.stream().mapToDouble(PlanAction.SetWaypoint::targetLat).average().orElse(0);
+
+        assertThat(formUpAvgLat).isCloseTo(38.90, org.assertj.core.data.Offset.offset(0.02));
+        assertThat(formUpAvgLng).isCloseTo(-77.40, org.assertj.core.data.Offset.offset(0.02));
+        assertThat(advanceAvgLat).isCloseTo(39.05, org.assertj.core.data.Offset.offset(0.02));
+    }
+
+    @Test
     void creationPromptYieldsUpsertTrackAndNoWaypoints() {
         when(graph.listSquadrons()).thenReturn(List.of());
         when(graph.listDrones()).thenReturn(List.of());

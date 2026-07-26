@@ -119,7 +119,6 @@ export default function DroneMap({
                 RECONNECT_MAX_MS,
             );
             reconnectAttempt += 1;
-            console.log(`Reconnecting in ${delay}ms (attempt ${reconnectAttempt})`);
             reconnectTimer = window.setTimeout(() => {
                 reconnectTimer = null;
                 connect();
@@ -134,7 +133,6 @@ export default function DroneMap({
             ws.binaryType = 'arraybuffer';
 
             ws.onopen = () => {
-                console.log('WebSocket Connection Established');
                 setConnectionStatus('Open');
                 reconnectAttempt = 0;
             };
@@ -153,8 +151,7 @@ export default function DroneMap({
                 }
             };
 
-            ws.onclose = (event: CloseEvent) => {
-                console.log(`WebSocket Disconnected. Code: ${event.code}, Reason: ${event.reason}`);
+            ws.onclose = () => {
                 setConnectionStatus('Closed');
                 scheduleReconnect();
             };

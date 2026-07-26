@@ -31,13 +31,26 @@ function inferFormation(plan: ExecutionPlan): string | null {
 
 function inferMissionKind(plan: ExecutionPlan): string | null {
     const types = new Set<string>();
+    let hasRoute = false;
     for (const a of plan.actions) {
         if (a.op === "setWaypoint" && a.mission_type) {
             types.add(a.mission_type.toUpperCase());
         }
+        if (a.op === "setRoute") {
+            hasRoute = true;
+            if (a.mission_type) {
+                types.add(a.mission_type.toUpperCase());
+            }
+        }
+    }
+    if (types.has("FORM_UP") && types.has("HOLD") && types.has("ADVANCE")) {
+        return "Form up → Hold → Advance";
     }
     if (types.has("FORM_UP") && types.has("ADVANCE")) {
         return "Form up → Advance";
+    }
+    if (hasRoute) {
+        return "Routed approach";
     }
     if (types.has("FORM_UP") || types.has("HOLD")) {
         return "Form up";
@@ -68,7 +81,7 @@ export function summarizePlan(plan: ExecutionPlan): PlanSummary {
 
     const droneIds = new Set<string>();
     for (const a of plan.actions) {
-        if (a.op === "setWaypoint") {
+        if (a.op === "setWaypoint" || a.op === "setRoute") {
             droneIds.add(a.droneId);
         }
     }
@@ -166,6 +179,11 @@ export function describePlanSteps(plan: ExecutionPlan): string[] {
             case "clearWaypoint":
                 steps.push(`Clear waypoint ${a.droneId}`);
                 break;
+            case "setRoute": {
+                const n = a.legs?.length ?? 0;
+                steps.push(`Route ${a.droneId}: ${n} ${n === 1 ? "leg" : "legs"}`);
+                break;
+            }
             default:
                 steps.push(titleCaseMission((a as { op: string }).op));
                 break;

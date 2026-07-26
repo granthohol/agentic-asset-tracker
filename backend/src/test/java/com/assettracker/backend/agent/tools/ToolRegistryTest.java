@@ -44,9 +44,10 @@ class ToolRegistryTest {
             "get_low_battery_drones_in_sector", "get_squadrons_for_objective", "get_drones_near",
             "list_formations", "preview_formation", "preview_two_phase",
             "list_tracks", "list_waypoints", "list_zones",
-            "get_track_by_id", "get_waypoint_by_id", "get_zone_by_id"
+            "get_track_by_id", "get_waypoint_by_id", "get_zone_by_id",
+            "plan_route"
         );
-        assertThat(names).hasSize(19);
+        assertThat(names).hasSize(20);
 
         for (JsonNode spec : specs) {
             assertThat(spec.hasNonNull("name")).isTrue();
@@ -209,6 +210,33 @@ class ToolRegistryTest {
         assertThat(result.isArray()).isTrue();
         assertThat(result.get(0).get("id").asText()).isEqualTo("zone-1");
         assertThat(result.get(0).get("type").asText()).isEqualTo("RESTRICTED");
+    }
+
+    @Test
+    void planRouteUsesRestrictedCirclesAndReturnsLegs() {
+        when(graph.listZones()).thenReturn(List.of(
+            new ZoneNode("zone-1", "No-Fly", ZoneType.RESTRICTED, ZoneShape.CIRCLE,
+                39.025, -77.20, 800.0, new double[0], new double[0]),
+            new ZoneNode("zone-2", "Patrol", ZoneType.PATROL, ZoneShape.CIRCLE,
+                39.025, -77.20, 800.0, new double[0], new double[0])
+        ));
+
+        ObjectNode args = mapper.createObjectNode();
+        args.put("fromLat", 39.00);
+        args.put("fromLng", -77.20);
+        args.put("toLat", 39.05);
+        args.put("toLng", -77.20);
+
+        JsonNode result = registry.invoke("plan_route", args);
+
+        assertThat(result.get("direct").asBoolean()).isFalse();
+        assertThat(result.get("legs")).isNotEmpty();
+        assertThat(result.get("avoidedZoneIds")).hasSize(1);
+        assertThat(result.get("avoidedZoneIds").get(0).asText()).isEqualTo("zone-1");
+        JsonNode last = result.get("legs").get(result.get("legs").size() - 1);
+        assertThat(last.get("lat").asDouble()).isEqualTo(39.05);
+        assertThat(last.get("lng").asDouble()).isEqualTo(-77.20);
+        verify(graph).listZones();
     }
 
     @Test

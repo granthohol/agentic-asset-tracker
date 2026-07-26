@@ -1,4 +1,5 @@
 import type { ExecutionPlan } from "./types/plan";
+import type { DroneDetail } from "./types/droneDetail";
 import type {
     MapWaypoint,
     Track,
@@ -9,6 +10,15 @@ import type {
 } from "./types/entity";
 
 const API_BASE = "http://localhost:8080";
+
+/** Neo4j graph detail for one drone (squadron assignment, etc.). */
+export async function fetchDroneDetail(droneId: string): Promise<DroneDetail> {
+    const res = await fetch(`${API_BASE}/api/drones/${encodeURIComponent(droneId)}`);
+    if (!res.ok) {
+        throw new Error(`/api/drones/${droneId} failed (${res.status})`);
+    }
+    return (await res.json()) as DroneDetail;
+}
 
 // Hit the planner, get a read-only plan back.
 export async function requestPlan(command: string): Promise<ExecutionPlan> {

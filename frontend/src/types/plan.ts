@@ -51,6 +51,14 @@ export interface SetWaypoint {
     mission_type?: string;
 }
 
+/** Multi-leg motion. legs are [[lat, lng], ...] ending at the destination. */
+export interface SetRoute {
+    op: "setRoute";
+    droneId: string;
+    legs: [number, number][];
+    mission_type?: string;
+}
+
 export interface ClearWaypoint {
     op: "clearWaypoint";
     droneId: string;
@@ -64,6 +72,7 @@ export type PlanAction =
     | RemoveDroneAssignment
     | RemoveSquadronFromObjective
     | SetWaypoint
+    | SetRoute
     | ClearWaypoint;
 
 export interface ExecutionPlan {

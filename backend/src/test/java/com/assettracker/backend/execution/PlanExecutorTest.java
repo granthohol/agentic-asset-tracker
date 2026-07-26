@@ -201,4 +201,54 @@ class PlanExecutorTest {
 
         verify(entityService).deleteZone("zone-abc");
     }
+
+    @Test
+    void setRoutePublishesLegsSequentiallyWaitingBetween() {
+        // Already at first leg; next publish only after arrival check.
+        when(droneService.getDrone("drone-000")).thenReturn(
+            new Drone("drone-000", 39.02, -77.19, 80, DroneStatus.ACTIVE)
+        );
+
+        ExecutionPlan plan = new ExecutionPlan("plan-route", "r", List.of(
+            new PlanAction.SetRoute(
+                "drone-000",
+                List.of(List.of(39.02, -77.19), List.of(39.05, -77.18)),
+                "ADVANCE")
+        ));
+
+        executor.execute(plan);
+
+        InOrder order = Mockito.inOrder(commandPublisher);
+        order.verify(commandPublisher).publishSetWaypoint(
+            "drone-000", 39.02, -77.19, PlanExecutor.TRANSIT_MISSION);
+        order.verify(commandPublisher).publishSetWaypoint(
+            "drone-000", 39.05, -77.18, "ADVANCE");
+        verify(droneService, Mockito.atLeastOnce()).getDrone("drone-000");
+    }
+
+    @Test
+    void waitsBetweenHoldAndAdvanceWaves() {
+        // Telemetry already at each target so wave waits return immediately.
+        when(droneService.getDrone("drone-000")).thenReturn(
+            new Drone("drone-000", 39.03, -77.18, 80, DroneStatus.ACTIVE),
+            new Drone("drone-000", 39.03, -77.18, 80, DroneStatus.ACTIVE),
+            new Drone("drone-000", 39.04, -77.185, 80, DroneStatus.ACTIVE),
+            new Drone("drone-000", 39.04, -77.185, 80, DroneStatus.ACTIVE),
+            new Drone("drone-000", 39.05, -77.18, 80, DroneStatus.ACTIVE)
+        );
+
+        ExecutionPlan plan = new ExecutionPlan("plan-hold", "r", List.of(
+            new PlanAction.SetWaypoint("drone-000", 39.03, -77.18, "FORM_UP"),
+            new PlanAction.SetWaypoint("drone-000", 39.04, -77.185, "HOLD"),
+            new PlanAction.SetWaypoint("drone-000", 39.05, -77.18, "ADVANCE")
+        ));
+
+        executor.execute(plan);
+
+        InOrder order = Mockito.inOrder(commandPublisher);
+        order.verify(commandPublisher).publishSetWaypoint("drone-000", 39.03, -77.18, "FORM_UP");
+        order.verify(commandPublisher).publishSetWaypoint("drone-000", 39.04, -77.185, "HOLD");
+        order.verify(commandPublisher).publishSetWaypoint("drone-000", 39.05, -77.18, "ADVANCE");
+        verify(droneService, Mockito.atLeastOnce()).getDrone("drone-000");
+    }
 }

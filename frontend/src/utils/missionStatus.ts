@@ -13,7 +13,9 @@ export function missionVisualStatus(
     }
     if (
         pendingPlan?.actions.some(
-            (a) => a.op === 'setWaypoint' && a.droneId === droneId,
+            (a) =>
+                (a.op === 'setWaypoint' || a.op === 'setRoute')
+                && a.droneId === droneId,
         )
     ) {
         return 'proposed';
@@ -39,13 +41,23 @@ export function droneMissionInfo(
             waypoint: { lat: route.targetLat, lng: route.targetLng },
         };
     }
-    const proposed = pendingPlan?.actions.find(
+    const proposedWp = pendingPlan?.actions.find(
         (a) => a.op === 'setWaypoint' && a.droneId === droneId,
     );
-    if (proposed && proposed.op === 'setWaypoint') {
+    if (proposedWp && proposedWp.op === 'setWaypoint') {
         return {
-            missionType: proposed.mission_type,
-            waypoint: { lat: proposed.targetLat, lng: proposed.targetLng },
+            missionType: proposedWp.mission_type,
+            waypoint: { lat: proposedWp.targetLat, lng: proposedWp.targetLng },
+        };
+    }
+    const proposedRoute = pendingPlan?.actions.find(
+        (a) => a.op === 'setRoute' && a.droneId === droneId,
+    );
+    if (proposedRoute && proposedRoute.op === 'setRoute' && proposedRoute.legs?.length) {
+        const [lat, lng] = proposedRoute.legs[0];
+        return {
+            missionType: proposedRoute.mission_type ?? 'TRANSIT',
+            waypoint: { lat, lng },
         };
     }
     return {};

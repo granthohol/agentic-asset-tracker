@@ -160,6 +160,25 @@ class PlanValidatorTest {
     }
 
     @Test
+    void acceptsValidSetRoute() {
+        assertThatCode(() -> validator.validate(plan(
+            new PlanAction.SetRoute(
+                "drone-000",
+                List.of(List.of(39.02, -77.19), List.of(39.05, -77.18)),
+                "ADVANCE")
+        ))).doesNotThrowAnyException();
+    }
+
+    @Test
+    void rejectsEmptySetRouteLegs() {
+        assertThatThrownBy(() -> validator.validate(plan(
+            new PlanAction.SetRoute("drone-000", List.of(), "ADVANCE")
+        )))
+            .isInstanceOf(IllegalArgumentException.class)
+            .hasMessageContaining("legs must be non-empty");
+    }
+
+    @Test
     void acceptsValidCircleZone() {
         assertThatCode(() -> validator.validate(plan(
             new PlanAction.UpsertZone(null, "zone-1", "No-Fly", ZoneType.RESTRICTED, ZoneShape.CIRCLE,

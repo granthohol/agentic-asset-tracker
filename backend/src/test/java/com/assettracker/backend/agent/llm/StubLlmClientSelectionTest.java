@@ -130,4 +130,247 @@ class StubLlmClientSelectionTest {
         assertThat(stub.tryEntityPlan("observe the disturbance at 39.05,-77.18 with a swarm",
             requestWith("x"))).isNull();
     }
+
+    @Test
+    void wantsAvoidDetectsRestrictedPhrases() {
+        assertThat(StubLlmClient.wantsAvoid("send drone-000 avoiding the restricted zone")).isTrue();
+        assertThat(StubLlmClient.wantsAvoid("fly around the no-fly area")).isTrue();
+        assertThat(StubLlmClient.wantsAvoid("observe the disturbance")).isFalse();
+    }
+
+    @Test
+    void entityNameMatchIgnoresGenericZoneToken() {
+        ObjectNode zone = mapper.createObjectNode().put("name", "Restricted Zone");
+        // Prompt mentions "restricted zone" generically — full name still matches.
+        assertThat(StubLlmClient.entityNameReferenced("avoid the restricted zone", zone)).isTrue();
+        // Token-only match on "zone" must not fire for a differently named entity.
+        ObjectNode other = mapper.createObjectNode().put("name", "Keep-Out Zone North");
+        assertThat(StubLlmClient.entityNameReferenced("avoid the no-fly area", other)).isFalse();
+    }
+
+    @Test
+    void avoidPromptUsesTrackNotRestrictedZoneAsAoi() {
+        String cmd = "send drone-000 to Red Track 1 avoiding the restricted zone";
+        ArrayNode tracks = mapper.createArrayNode();
+        tracks.addObject().put("id", "trk-1").put("name", "Red Track 1")
+            .put("latitude", 39.05).put("longitude", -77.18);
+        ArrayNode zones = mapper.createArrayNode();
+        zones.addObject().put("id", "zone-1").put("name", "Restricted Zone")
+            .put("type", "RESTRICTED").put("shape", "CIRCLE")
+            .put("centerLatitude", 39.025).put("centerLongitude", -77.19)
+            .put("radiusMeters", 800);
+
+        LlmRequest req = requestWith(cmd,
+            LlmMessage.toolResults(List.of(
+                new ToolResult("c_tr", "list_tracks", tracks, false),
+                new ToolResult("c_z", "list_zones", zones, false))));
+
+        LlmResponse step = stub.complete(req);
+        assertThat(step.stopReason()).isEqualTo(LlmResponse.StopReason.TOOL_USE);
+        assertThat(step.toolCalls().get(0).name()).isEqualTo("plan_route");
+        assertThat(step.toolCalls().get(0).input().get("toLat").asDouble()).isEqualTo(39.05);
+        assertThat(step.toolCalls().get(0).input().get("toLng").asDouble()).isEqualTo(-77.18);
+        // Must not route into the restricted zone center.
+        assertThat(step.toolCalls().get(0).input().get("toLat").asDouble()).isNotEqualTo(39.025);
+    }
+
+    @Test
+    void planRouteErrorDoesNotSilentlyGoDirect() {
+        ObjectNode err = mapper.createObjectNode().put("error", "destination is inside restricted zone 'z1'");
+        assertThat(StubLlmClient.routeHasError(err)).isTrue();
+        org.junit.jupiter.api.Assertions.assertThrows(IllegalStateException.class,
+            () -> StubLlmClient.requireSuccessfulRoute(err));
+    }
+
+    @Test
+    void wantsNamedFormUpDetectsRallyLanguage() {
+        assertThat(StubLlmClient.wantsNamedFormUp(
+            "form a drone swarm at the waypoint \"rally\", then send to red track 1")).isTrue();
+        assertThat(StubLlmClient.wantsNamedFormUp("assemble at rally then advance")).isTrue();
+        assertThat(StubLlmClient.wantsNamedFormUp("observe the disturbance at 39.05,-77.18")).isFalse();
+    }
+
+    @Test
+    void formAtRallyThenTrackUsesWaypointForFormUpAndTrackForAdvance() {
+        String cmd = "Form a drone swarm at the waypoint \"Rally\", then once formed, send the swarm to Red Track 1.";
+        ArrayNode waypoints = mapper.createArrayNode();
+        waypoints.addObject().put("id", "wp-rally").put("name", "Rally")
+            .put("latitude", 38.90).put("longitude", -77.40);
+        ArrayNode tracks = mapper.createArrayNode();
+        tracks.addObject().put("id", "trk-1").put("name", "Red Track 1")
+            .put("latitude", 39.05).put("longitude", -77.18);
+
+        LlmRequest req1 = requestWith(cmd,
+            LlmMessage.toolResults(List.of(
+                new ToolResult("c_wp", "list_waypoints", waypoints, false),
+                new ToolResult("c_tr", "list_tracks", tracks, false))));
+
+        LlmResponse step1 = stub.complete(req1);
+        assertThat(step1.stopReason()).isEqualTo(LlmResponse.StopReason.TOOL_USE);
+        assertThat(step1.toolCalls().get(0).name()).isEqualTo("preview_two_phase");
+        assertThat(step1.toolCalls().get(0).input().get("aoiLat").asDouble()).isEqualTo(39.05);
+        assertThat(step1.toolCalls().get(0).input().get("aoiLng").asDouble()).isEqualTo(-77.18);
+
+        ObjectNode summary = mapper.createObjectNode();
+        summary.put("formationType", "RING");
+        summary.put("droneCount", 5);
+        summary.putObject("formUpCenter").put("lat", 39.032).put("lng", -77.18);
+        summary.putObject("advanceCenter").put("lat", 39.05).put("lng", -77.18);
+
+        java.util.List<LlmMessage> messages = new java.util.ArrayList<>(req1.messages());
+        messages.add(LlmMessage.assistant(step1.text(), step1.toolCalls()));
+        messages.add(LlmMessage.toolResults(List.of(
+            new ToolResult("call_preview_two_phase", "preview_two_phase", summary, false))));
+        LlmResponse step2 = stub.complete(new LlmRequest("system", messages, mapper.createArrayNode(), 2048));
+        assertThat(step2.stopReason()).isEqualTo(LlmResponse.StopReason.END);
+
+        ExecutionPlan plan;
+        try {
+            plan = mapper.readValue(step2.text(), ExecutionPlan.class);
+        } catch (Exception e) {
+            throw new AssertionError(e);
+        }
+        PlanAction.ApplyFormation formUp = (PlanAction.ApplyFormation) plan.actions().stream()
+            .filter(a -> a instanceof PlanAction.ApplyFormation af && "FORM_UP".equals(af.missionType()))
+            .findFirst().orElseThrow();
+        PlanAction.ApplyFormation advance = (PlanAction.ApplyFormation) plan.actions().stream()
+            .filter(a -> a instanceof PlanAction.ApplyFormation af && "ADVANCE".equals(af.missionType()))
+            .findFirst().orElseThrow();
+
+        // FORM_UP at Rally — not the standoff near Red Track from preview_two_phase.
+        assertThat(formUp.centerLat()).isEqualTo(38.90);
+        assertThat(formUp.centerLng()).isEqualTo(-77.40);
+        assertThat(advance.centerLat()).isEqualTo(39.05);
+        assertThat(advance.centerLng()).isEqualTo(-77.18);
+    }
+
+    @Test
+    void singleDroneAvoidRequestsPlanRouteThenEmitsSetRoute() {
+        String cmd = "send drone-000 to 39.05,-77.18 avoid the restricted zone";
+        LlmRequest req1 = requestWith(cmd, zoneListResult("zone-1", "Restricted Zone", 39.025, -77.19));
+        LlmResponse step1 = stub.complete(req1);
+        assertThat(step1.stopReason()).isEqualTo(LlmResponse.StopReason.TOOL_USE);
+        assertThat(step1.toolCalls()).hasSize(1);
+        assertThat(step1.toolCalls().get(0).name()).isEqualTo("plan_route");
+
+        ObjectNode route = mapper.createObjectNode();
+        ArrayNode legs = route.putArray("legs");
+        legs.addObject().put("lat", 39.03).put("lng", -77.17);
+        legs.addObject().put("lat", 39.05).put("lng", -77.18);
+        route.putArray("avoidedZoneIds").add("zone-1");
+        route.put("direct", false);
+
+        java.util.List<LlmMessage> messages = new java.util.ArrayList<>(req1.messages());
+        messages.add(LlmMessage.assistant(step1.text(), step1.toolCalls()));
+        messages.add(LlmMessage.toolResults(List.of(
+            new ToolResult("call_plan_route", "plan_route", route, false))));
+        LlmRequest req2 = new LlmRequest("system", messages, mapper.createArrayNode(), 2048);
+
+        LlmResponse step2 = stub.complete(req2);
+        assertThat(step2.stopReason()).isEqualTo(LlmResponse.StopReason.END);
+        ExecutionPlan plan;
+        try {
+            plan = mapper.readValue(step2.text(), ExecutionPlan.class);
+        } catch (Exception e) {
+            throw new AssertionError(e);
+        }
+        assertThat(plan.actions().stream().anyMatch(a -> a instanceof PlanAction.SetRoute)).isTrue();
+        PlanAction.SetRoute setRoute = (PlanAction.SetRoute) plan.actions().stream()
+            .filter(a -> a instanceof PlanAction.SetRoute).findFirst().orElseThrow();
+        assertThat(setRoute.droneId()).isEqualTo("drone-000");
+        assertThat(setRoute.legs()).hasSize(2);
+    }
+
+    @Test
+    void swarmAvoidWithNamedRallyRoutesFromRallyNotLeaderPosition() {
+        // requestWith()'s fixture only has one drone, which would (correctly) take the
+        // single-drone avoid path instead of the swarm path this test targets, so build the
+        // fleet inline with enough drones to select a genuine swarm.
+        String cmd = "Send 5 drones to form up in a wedge at the waypoint \"Rally\", "
+            + "then once formed up, send them to \"Red Track 1\" while avoiding the restricted zone.";
+        ArrayNode drones = mapper.createArrayNode();
+        for (String id : fleet) {
+            drones.addObject().put("id", id).put("latitude", 39.0).put("longitude", -77.2);
+        }
+        ArrayNode waypoints = mapper.createArrayNode();
+        waypoints.addObject().put("id", "wp-rally").put("name", "Rally")
+            .put("latitude", 38.90).put("longitude", -77.40);
+        ArrayNode tracks = mapper.createArrayNode();
+        tracks.addObject().put("id", "trk-1").put("name", "Red Track 1")
+            .put("latitude", 39.05).put("longitude", -77.18);
+
+        java.util.List<LlmMessage> req1Messages = new java.util.ArrayList<>();
+        req1Messages.add(LlmMessage.user(cmd));
+        req1Messages.add(LlmMessage.toolResults(List.of(
+            new ToolResult("c_drones", "list_drones", drones, false))));
+        req1Messages.add(LlmMessage.toolResults(List.of(
+            new ToolResult("c_wp", "list_waypoints", waypoints, false),
+            new ToolResult("c_tr", "list_tracks", tracks, false))));
+        LlmRequest req1 = new LlmRequest("system", req1Messages, mapper.createArrayNode(), 2048);
+
+        LlmResponse step1 = stub.complete(req1);
+        assertThat(step1.stopReason()).isEqualTo(LlmResponse.StopReason.TOOL_USE);
+        assertThat(step1.toolCalls().get(0).name()).isEqualTo("preview_two_phase");
+
+        ObjectNode summary = mapper.createObjectNode();
+        summary.put("formationType", "WEDGE");
+        summary.put("droneCount", 5);
+        summary.putObject("formUpCenter").put("lat", 39.032).put("lng", -77.18);
+        summary.putObject("advanceCenter").put("lat", 39.05).put("lng", -77.18);
+
+        java.util.List<LlmMessage> messages = new java.util.ArrayList<>(req1.messages());
+        messages.add(LlmMessage.assistant(step1.text(), step1.toolCalls()));
+        messages.add(LlmMessage.toolResults(List.of(
+            new ToolResult("call_preview_two_phase", "preview_two_phase", summary, false))));
+        LlmResponse step2 = stub.complete(new LlmRequest("system", messages, mapper.createArrayNode(), 2048));
+
+        assertThat(step2.stopReason()).isEqualTo(LlmResponse.StopReason.TOOL_USE);
+        assertThat(step2.toolCalls().get(0).name()).isEqualTo("plan_route");
+        // Regression: the route must originate at the named rally point, not the leader's raw
+        // starting position or the computed standoff center — otherwise the detour legs don't
+        // match the leg the swarm actually flies (Rally -> Red Track 1).
+        assertThat(step2.toolCalls().get(0).input().get("fromLat").asDouble()).isEqualTo(38.90);
+        assertThat(step2.toolCalls().get(0).input().get("fromLng").asDouble()).isEqualTo(-77.40);
+        assertThat(step2.toolCalls().get(0).input().get("toLat").asDouble()).isEqualTo(39.05);
+        assertThat(step2.toolCalls().get(0).input().get("toLng").asDouble()).isEqualTo(-77.18);
+
+        // Complete the loop: plan_route detours around the zone; the final plan should FORM_UP
+        // at Rally, HOLD at the detour leg, ADVANCE at Red Track 1.
+        ObjectNode route = mapper.createObjectNode();
+        ArrayNode legs = route.putArray("legs");
+        legs.addObject().put("lat", 38.95).put("lng", -77.35);
+        legs.addObject().put("lat", 39.05).put("lng", -77.18);
+        route.putArray("avoidedZoneIds").add("zone-1");
+        route.put("direct", false);
+
+        messages.add(LlmMessage.assistant(step2.text(), step2.toolCalls()));
+        messages.add(LlmMessage.toolResults(List.of(
+            new ToolResult("call_plan_route", "plan_route", route, false))));
+        LlmResponse step3 = stub.complete(new LlmRequest("system", messages, mapper.createArrayNode(), 2048));
+        assertThat(step3.stopReason()).isEqualTo(LlmResponse.StopReason.END);
+
+        ExecutionPlan plan;
+        try {
+            plan = mapper.readValue(step3.text(), ExecutionPlan.class);
+        } catch (Exception e) {
+            throw new AssertionError(e);
+        }
+        List<PlanAction.ApplyFormation> formations = plan.actions().stream()
+            .filter(a -> a instanceof PlanAction.ApplyFormation)
+            .map(a -> (PlanAction.ApplyFormation) a)
+            .toList();
+        PlanAction.ApplyFormation formUp = formations.stream()
+            .filter(a -> "FORM_UP".equals(a.missionType())).findFirst().orElseThrow();
+        PlanAction.ApplyFormation hold = formations.stream()
+            .filter(a -> "HOLD".equals(a.missionType())).findFirst().orElseThrow();
+        PlanAction.ApplyFormation advance = formations.stream()
+            .filter(a -> "ADVANCE".equals(a.missionType())).findFirst().orElseThrow();
+
+        assertThat(formUp.centerLat()).isEqualTo(38.90);
+        assertThat(formUp.centerLng()).isEqualTo(-77.40);
+        assertThat(hold.centerLat()).isEqualTo(38.95);
+        assertThat(hold.centerLng()).isEqualTo(-77.35);
+        assertThat(advance.centerLat()).isEqualTo(39.05);
+        assertThat(advance.centerLng()).isEqualTo(-77.18);
+    }
 }

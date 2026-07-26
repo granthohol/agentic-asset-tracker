@@ -49,12 +49,38 @@ public class AgentOrchestrationService {
         the operator names an area instead of coordinates.
 
         Swarm / formation requests: pick a type (RING, WEDGE, LINE). Choose drones from the prompt:
-        explicit ids (drone-000, etc.), a count ("5 drones"), else ALL drones from list_drones. Call
-        preview_two_phase(formationType, droneIds, aoiLat, aoiLng) ONCE. It returns
-        { formationType, droneCount, formUpCenter{lat,lng}, advanceCenter{lat,lng} }. Then emit TWO
-        applyFormation actions (do NOT emit per-drone setWaypoint for swarms): first at formUpCenter
-        with mission_type FORM_UP and facingLat/facingLng set to the AOI; then at advanceCenter with
-        mission_type ADVANCE. The backend expands each applyFormation into per-drone waypoints.
+        explicit ids (drone-000, etc.), a count ("5 drones"), else ALL drones from list_drones.
+
+        Two-phase destination (AOI): resolve the ADVANCE target from the prompt — a named track,
+        zone, or explicit lat/lng (list_tracks / list_zones). Call
+        preview_two_phase(formationType, droneIds, aoiLat, aoiLng) ONCE with that ADVANCE AOI. It
+        returns { formationType, droneCount, formUpCenter{lat,lng}, advanceCenter{lat,lng} }.
+
+        FORM_UP center: if the operator names a distinct form-up / rally location (a map waypoint
+        from list_waypoints, e.g. "form at Rally, then go to Red Track 1"), use THAT waypoint's
+        lat/lng as the FORM_UP applyFormation center — do NOT use preview_two_phase's formUpCenter
+        (that standoff is only for when no rally point is named). Always emit FORM_UP before ADVANCE.
+        Emit TWO applyFormation actions (do NOT emit per-drone setWaypoint for swarms): first at the
+        FORM_UP center with mission_type FORM_UP and facingLat/facingLng set to the AOI; then at
+        advanceCenter with mission_type ADVANCE. The backend expands each applyFormation into
+        per-drone waypoints.
+
+        Avoiding restricted / no-fly zones:
+          1. Call list_zones, then plan_route(fromLat, fromLng, toLat, toLng). It returns
+             { legs:[{lat,lng},...], avoidedZoneIds, direct } or { error }. Only RESTRICTED CIRCLE zones
+             are avoided. NEVER use a RESTRICTED zone's center as the destination AOI — resolve the
+             destination from a track, PATROL zone, waypoint, or explicit lat/lng first.
+          2. If plan_route returns { error }, do NOT emit a straight-line plan; pick a destination
+             outside every RESTRICTED circle and call plan_route again.
+          3. Single drone: emit setRoute { droneId, legs: [[lat,lng],...], mission_type } using plan_route
+             legs (do NOT invent detour coords; do NOT flatten to concurrent setWaypoints).
+          4. Swarm: if the operator named a rally/FORM_UP waypoint, plan_route(that waypoint's
+             lat/lng -> advanceCenter) — that is the leg the swarm actually flies, so it is the one
+             that must be checked against the no-fly. Otherwise plan_route(leader current position ->
+             advanceCenter), not formUp->advance (the computed standoff center often sits on the
+             no-fly itself). If direct, keep two applyFormation actions. If detour legs exist,
+             FORM_UP at the named rally (or the first detour leg if none was named), HOLD at later
+             intermediate legs, ADVANCE at advanceCenter.
 
         When done, output ONE JSON object ExecutionPlan:
           { "planId": string, "rationale": string, "actions": PlanAction[] }
@@ -67,6 +93,7 @@ public class AgentOrchestrationService {
           - removeDroneAssignment:      { op, droneId }
           - removeSquadronFromObjective:{ op, squadronId }
           - setWaypoint:                { op, droneId, targetLat, targetLng, mission_type? }
+          - setRoute:                   { op, droneId, legs: [[lat,lng],...], mission_type? }
           - applyFormation:             { op, formationType, centerLat, centerLng, droneIds, mission_type?, spacingMeters?, facingLat?, facingLng? }
           - clearWaypoint:              { op, droneId }
           - upsertTrack:                { op, id? | tempId?, name, affiliation, domain, latitude, longitude }

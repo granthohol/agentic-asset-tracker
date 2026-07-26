@@ -25,25 +25,61 @@ function clampPanelPct(pct: number): number {
   return Math.min(PANEL_PCT_MAX, Math.max(PANEL_PCT_MIN, pct));
 }
 
-function isFormUpMission(missionType?: string): boolean {
-  const m = (missionType ?? '').toUpperCase();
-  return m === 'FORM_UP' || m === 'HOLD';
+function normalizeMission(missionType?: string): string {
+  return (missionType ?? '').trim().toUpperCase();
 }
 
-function routesFromPlan(plan: ExecutionPlan, missionFilter?: 'FORM_UP' | 'ADVANCE'): AcceptedRoute[] {
-  return plan.actions.flatMap((action, i) => {
-    if (action.op !== 'setWaypoint') return [];
-    const formUp = isFormUpMission(action.mission_type);
-    if (missionFilter === 'FORM_UP' && !formUp) return [];
-    if (missionFilter === 'ADVANCE' && formUp) return [];
-    return [{
-      id: `${plan.planId}-${i}`,
-      droneId: action.droneId,
-      targetLat: action.targetLat,
-      targetLng: action.targetLng,
-      missionType: action.mission_type,
-    }];
-  });
+/**
+ * Ordered motion waves for overlays. Contiguous setWaypoints share a wave by mission_type;
+ * each setRoute leg is its own one-drone wave (TRANSIT then final mission_type).
+ */
+function routeWavesFromPlan(plan: ExecutionPlan): AcceptedRoute[][] {
+  const waves: AcceptedRoute[][] = [];
+  const actions = plan.actions;
+  let i = 0;
+  while (i < actions.length) {
+    const action = actions[i];
+    if (action.op === 'setRoute') {
+      const legs = action.legs ?? [];
+      for (let li = 0; li < legs.length; li++) {
+        const [lat, lng] = legs[li];
+        const last = li === legs.length - 1;
+        waves.push([{
+          id: `${plan.planId}-route-${i}-leg-${li}`,
+          droneId: action.droneId,
+          targetLat: lat,
+          targetLng: lng,
+          missionType: last ? (action.mission_type ?? 'ADVANCE') : 'TRANSIT',
+        }]);
+      }
+      i++;
+      continue;
+    }
+    if (action.op === 'setWaypoint') {
+      const waveType = normalizeMission(action.mission_type);
+      const wave: AcceptedRoute[] = [];
+      while (i < actions.length) {
+        const next = actions[i];
+        if (next.op !== 'setWaypoint' || normalizeMission(next.mission_type) !== waveType) {
+          break;
+        }
+        wave.push({
+          id: `${plan.planId}-${i}`,
+          droneId: next.droneId,
+          targetLat: next.targetLat,
+          targetLng: next.targetLng,
+          missionType: next.mission_type,
+        });
+        i++;
+      }
+      if (wave.length > 0) {
+        waves.push(wave);
+      }
+      continue;
+    }
+    i++;
+  }
+  return waves;
 }
 
 function objectivesFromPlan(plan: ExecutionPlan): MissionObjective[] {
@@ -63,7 +99,7 @@ function objectivesFromPlan(plan: ExecutionPlan): MissionObjective[] {
 function droneIdsFromPlan(plan: ExecutionPlan): string[] {
   const ids = new Set<string>();
   for (const a of plan.actions) {
-    if (a.op === 'setWaypoint') {
+    if (a.op === 'setWaypoint' || a.op === 'setRoute') {
       ids.add(a.droneId);
     }
   }
@@ -86,8 +122,10 @@ function App() {
   const [panelPct, setPanelPct] = useState(PANEL_PCT_DEFAULT);
   const [resizing, setResizing] = useState(false);
   const appRef = useRef<HTMLDivElement>(null);
-  /** Kept so we can swap FORM_UP overlays for ADVANCE after form-up. */
+  /** Kept so we can clear drones when the last wave finishes. */
   const approvedPlanRef = useRef<ExecutionPlan | null>(null);
+  /** Remaining overlay waves after the current acceptedRoutes wave. */
+  const remainingWavesRef = useRef<AcceptedRoute[][]>([]);
 
   const flash = (t: Toast) => {
     setToast(t);
@@ -96,6 +134,7 @@ function App() {
 
   const clearMissionUi = () => {
     approvedPlanRef.current = null;
+    remainingWavesRef.current = [];
     setAcceptedRoutes([]);
     setActiveObjectives([]);
     setPendingPlan(null);
@@ -131,9 +170,9 @@ function App() {
     try {
       await executePlan(plan);
       approvedPlanRef.current = plan;
-      const formUp = routesFromPlan(plan, 'FORM_UP');
-      const advanceOnly = routesFromPlan(plan, 'ADVANCE');
-      setAcceptedRoutes(formUp.length > 0 ? formUp : [...formUp, ...advanceOnly]);
+      const waves = routeWavesFromPlan(plan);
+      remainingWavesRef.current = waves.slice(1);
+      setAcceptedRoutes(waves[0] ?? []);
       setActiveObjectives(objectivesFromPlan(plan));
       setPendingPlan(null);
       setMissionCard((prev) => (prev ? { ...prev, status: 'running' } : null));
@@ -173,16 +212,11 @@ function App() {
 
     setAcceptedRoutes((prev) => {
       const remaining = prev.filter((route) => !done.has(route.id));
-      const completedFormUp = prev.some(
-        (r) => done.has(r.id) && isFormUpMission(r.missionType),
-      );
-      const stillHasFormUp = remaining.some((r) => isFormUpMission(r.missionType));
-
-      if (completedFormUp && !stillHasFormUp && approvedPlanRef.current) {
-        const advance = routesFromPlan(approvedPlanRef.current, 'ADVANCE');
-        if (advance.length > 0) {
-          return advance;
-        }
+      // Whole current wave done → swap in the next wave (HOLD / TRANSIT / ADVANCE / …).
+      if (remaining.length === 0 && remainingWavesRef.current.length > 0) {
+        const [next, ...rest] = remainingWavesRef.current;
+        remainingWavesRef.current = rest;
+        return next;
       }
       return remaining;
     });
@@ -192,6 +226,7 @@ function App() {
   useEffect(() => {
     if (
       acceptedRoutes.length === 0
+      && remainingWavesRef.current.length === 0
       && !pendingPlan
       && missionCard?.status === 'running'
     ) {

@@ -41,7 +41,7 @@ TURN_NOISE_RAD_PER_S = 0.6
 TURN_DAMP_PER_S = 0.8
 MAX_TURN_RATE_RAD_PER_S = 0.5
 ROAM_RADIUS_DEG = 0.08  # soft boundary, steer back toward center
-BATTERY_STEP_HZ = 1.0     # drain rate is independent of publish Hz
+BATTERY_STEP_HZ = 0.05    # one drain tick every ~20s (rate-independent of publish Hz)
 
 PUBLISH_FREQ = 1.0
 JITTER_RATIO = 0.2
@@ -120,11 +120,11 @@ class SimulatedDrone:
             self.longitude += step * (dlng / dist)
 
     def _step_battery(self, dt: float) -> None:
-        # ~1 Hz battery steps regardless of publish rate.
+        # Battery ticks on a fixed wall-clock interval, not every physics step.
         self.battery_accum += dt
         while self.battery_accum >= 1.0 / BATTERY_STEP_HZ:
             self.battery_accum -= 1.0 / BATTERY_STEP_HZ
-            self.battery_level = max(0, min(100, self.battery_level + random.randint(-2, 1)))
+            self.battery_level = max(0, min(100, self.battery_level + random.randint(-1, 0)))
 
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description="Publish mock drone telemetry to Kafka and consume waypoint commands.")

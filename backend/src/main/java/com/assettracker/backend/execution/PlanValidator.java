@@ -64,6 +64,22 @@ public class PlanValidator {
                 requireCoord(a.targetLat(), -90, 90, index, "setWaypoint.targetLat");
                 requireCoord(a.targetLng(), -180, 180, index, "setWaypoint.targetLng");
             }
+            case PlanAction.SetRoute a -> {
+                requireLiteral(a.droneId(), index, "setRoute.droneId");
+                if (a.legs() == null || a.legs().isEmpty()) {
+                    throw new IllegalArgumentException(
+                        "action " + index + " (setRoute): legs must be non-empty");
+                }
+                for (int li = 0; li < a.legs().size(); li++) {
+                    List<Double> leg = a.legs().get(li);
+                    if (leg == null || leg.size() != 2 || leg.get(0) == null || leg.get(1) == null) {
+                        throw new IllegalArgumentException(
+                            "action " + index + " (setRoute): leg " + li + " must be [lat, lng]");
+                    }
+                    requireCoord(leg.get(0), -90, 90, index, "setRoute.legs[" + li + "].lat");
+                    requireCoord(leg.get(1), -180, 180, index, "setRoute.legs[" + li + "].lng");
+                }
+            }
             case PlanAction.ApplyFormation a -> {
                 if (a.formationType() == null) {
                     throw new IllegalArgumentException(

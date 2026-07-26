@@ -139,7 +139,7 @@ Operator prompt
 
 The LLM is a planner, not an executor. If it hallucinates an id or a bad coordinate, nothing mutates until you click Accept, and `PlanValidator` catches structural errors before Kafka sees the plan.
 
-### Tool surface (18 read-only tools)
+### Tool surface (20 read-only tools)
 
 Tools live in `ToolRegistry` and only touch `GraphService` (reads). The registry never imports `GraphWriter`, so "the agent can't mutate" is a compile time boundary.
 
@@ -155,6 +155,9 @@ Tools live in `ToolRegistry` and only touch `GraphService` (reads). The registry
 - **Formation geometry**
   - Tools: `list_formations`, `preview_formation`, `preview_two_phase`
   - Swarm math runs server-side. The model picks formation type + drone ids + AOI; the backend computes slot coordinates.
+- **Routing**
+  - Tools: `plan_route`
+  - Straight line when clear; otherwise detours around RESTRICTED CIRCLE zones. Single drones get `setRoute` legs; swarms insert HOLD formation centers along the detour.
 
 
 ### Multi-turn orchestration
@@ -205,7 +208,7 @@ The `LlmClient` seam (`stub` vs `anthropic`) means offline dev and tests need no
 
 ### 3. Human-in-the-loop C2
 
-The LLM never writes. It reads via 18 tools, returns an `ExecutionPlan`, and waits for Accept. `PlanValidator` checks schema/policy; `PlanExecutor` is the only write path. Two-phase swarms gate ADVANCE on FORM_UP arrival in the executor, not in the model.
+The LLM never writes. It reads via 20 tools, returns an `ExecutionPlan`, and waits for Accept. `PlanValidator` checks schema/policy; `PlanExecutor` is the only write path. Two-phase swarms gate ADVANCE on FORM_UP arrival in the executor, not in the model. `plan_route` + `setRoute` (or HOLD formation waves) avoid RESTRICTED CIRCLE zones.
 
 ### 4. Graph ontology + map entities
 
