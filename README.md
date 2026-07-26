@@ -248,4 +248,4 @@ Open `http://localhost:5173`. Default planner is offline (`llm.provider=stub`). 
 
 ## License
 
-Personal learning project. Use as reference; no warranty. Don't kill my token spend please <3
+Personal learning project. Use as reference; no warranty.
