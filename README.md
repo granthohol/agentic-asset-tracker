@@ -9,6 +9,7 @@ So if you're a recruiter or engineer skimming this: the value isn't the app itse
 ---
 
 ## Demo
+https://github.com/user-attachments/assets/4d5cdddf-99eb-4fc1-a05b-835dab2ef435
 
 <!-- Replace each placeholder with a GIF or short MP4 hosted on GitHub (drag into an issue/PR comment, copy URL) or link to a Loom/YouTube clip. Keep clips 15–45 seconds. -->
 
