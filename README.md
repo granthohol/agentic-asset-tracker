@@ -4,7 +4,7 @@ A command-and-control dashboard for a simulated drone fleet. Type a mission in n
 
 **Honest disclaimer:** This isn't solving a real problem. There's no customer, no deployment target, and no product roadmap. I built it because I thought an ops map with an agentic planner was cool, because I wanted to learn event driven systems end to end, and because I was preparing for a Palantir internship where we are doing something similar and wanted practice with the kind of work that involves: messy real-time data, graph shaped state, human-in-the-loop writes, and making expensive things cheap enough to demo.
 
-So if you're a recruiter or engineer skimming this: the value isn't the app itself (sorry, I have some other things on my GitHub where it *does* matter so check those out!). It's the systems thinking underneath.
+So if you're a recruiter or engineer skimming this: the value isn't the app itself (sorry, I have some other things on my GitHub where it *does* matter so check those out!). The value is in the systems thinking underneath and what I learned and practiced with while building.
 
 ---
 
